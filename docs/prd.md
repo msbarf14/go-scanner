@@ -5,20 +5,26 @@
 | Item | Nilai |
 |---|---|
 | Nama produk | Fenturun 2026 BIB & Race Pack Scanner |
-| Jenis produk | Web scanner responsif berbasis Go |
+| Jenis produk | Web scanner berbasis Go dengan dua halaman: Display dan Scanner |
 | Aplikasi sumber | `../fenturun2026` |
 | Database | PostgreSQL existing milik aplikasi Laravel |
-| Target perangkat utama | Smartphone dengan kamera belakang |
-| Metode input cadangan | Scanner USB/Bluetooth dan input manual |
+| Target perangkat | TV/monitor (Display) dan HP/tablet (Scanner) |
+| Metode input utama | Scanner USB/Bluetooth (keyboard wedge) |
+| Metode input cadangan | Input manual |
 | Mode koneksi | Online wajib |
 | Status dokumen | Baseline implementasi MVP |
 | Tanggal verifikasi data | 20 Juli 2026 |
 
 ## 2. Ringkasan Produk
 
-Fenturun 2026 BIB & Race Pack Scanner adalah aplikasi terpisah berbasis Go untuk memvalidasi tiket peserta dan menandai race pack telah diserahkan. Aplikasi digunakan petugas melalui smartphone dan mengutamakan kamera belakang sebagai pemindai QR.
+Fenturun 2026 BIB & Race Pack Scanner adalah aplikasi berbasis Go untuk memvalidasi tiket peserta dan menandai race pack telah diserahkan. Aplikasi terdiri dari dua halaman:
+
+1. **Runner Display** (`/`) — Tampilan fullscreen untuk TV/monitor yang menampilkan info peserta setelah scan.
+2. **Runner Scanner** (`/runner-scanner`) — Halaman input untuk operator menggunakan barcode scanner USB.
 
 Service Go terhubung langsung ke database PostgreSQL existing milik aplikasi Laravel Fenturun 2026. Service tidak membuat atau mengelola order, participant, ticket, maupun pembayaran. Service hanya membaca data yang diperlukan untuk validasi dan memperbarui status pengambilan race pack pada order yang valid.
+
+**Tanpa autentikasi** — operator menggunakan `DEFAULT_OPERATOR_ID` dari konfigurasi environment.
 
 MVP tidak membutuhkan migration atau tabel baru. Status pengambilan menggunakan kolom existing:
 
@@ -51,11 +57,12 @@ Scanner tetap wajib memverifikasi asumsi tersebut pada setiap scan. Order dengan
 
 ## 3. Latar Belakang
 
-Aplikasi Laravel Fenturun 2026 telah menangani registrasi, pembayaran, penerbitan tiket digital, QR tiket, BIB, user, role, dan status race pack. Aplikasi tersebut juga memiliki scanner berbasis Filament/Livewire, tetapi operasional pengambilan race pack membutuhkan aplikasi yang lebih ringan dan nyaman digunakan melalui smartphone.
+Aplikasi Laravel Fenturun 2026 telah menangani registrasi, pembayaran, penerbitan tiket digital, QR tiket, BIB, user, role, dan status race pack. Aplikasi tersebut juga memiliki scanner berbasis Filament/Livewire, tetapi operasional pengambilan race pack membutuhkan aplikasi yang lebih ringan dan nyaman digunakan.
 
 Kebutuhan utama operasional adalah:
 
-- Membuka kamera smartphone secara langsung untuk memindai QR tiket.
+- Menampilkan info peserta pada TV/monitor untuk verifikasi visual.
+- Memindai QR tiket menggunakan barcode scanner USB.
 - Memberikan hasil validasi dalam waktu singkat.
 - Memastikan hanya order paid yang dapat mengambil race pack.
 - Mencegah race pack yang sama diserahkan dua kali.
@@ -67,12 +74,12 @@ Kebutuhan utama operasional adalah:
 
 ### 4.1 Tujuan Utama
 
-Menyediakan proses scan dan konfirmasi pengambilan race pack yang cepat, sederhana, aman dari pengambilan ganda, dan dapat digunakan melalui kamera smartphone.
+Menyediakan proses scan dan konfirmasi pengambilan race pack yang cepat, sederhana, aman dari pengambilan ganda, dengan tampilan display untuk TV/monitor dan input melalui barcode scanner USB.
 
 ### 4.2 Tujuan Operasional
 
-- Petugas dapat login menggunakan akun existing Laravel.
-- Petugas dapat memindai tiket menggunakan kamera belakang smartphone.
+- Sistem dapat menampilkan info peserta pada TV/monitor (Runner Display).
+- Petugas dapat memindai tiket menggunakan barcode scanner USB.
 - Sistem dapat mengenali QR tiket existing tanpa menerbitkan ulang tiket.
 - Petugas dapat melihat identitas operasional minimum peserta sebelum menyerahkan race pack.
 - Sistem dapat mencatat waktu dan operator pengambilan.
@@ -84,7 +91,8 @@ Menyediakan proses scan dan konfirmasi pengambilan race pack yang cepat, sederha
 - Menyediakan service Go yang ringan dan mudah di-deploy.
 - Menggunakan koneksi PostgreSQL yang aman dan terbatas.
 - Melakukan konfirmasi pickup secara atomik dalam satu statement database.
-- Menyediakan antarmuka web responsif dengan dukungan PWA.
+- Menyediakan dua halaman: Display (dark theme) dan Scanner (light theme).
+- Menggunakan in-memory cache untuk data display.
 - Menyediakan health check dan structured logging.
 - Tidak menambahkan migration atau tabel database pada MVP.
 
@@ -113,12 +121,13 @@ Scanner Operator adalah petugas penyerahan race pack.
 
 Hak akses:
 
-- Login ke aplikasi scanner.
-- Membuka kamera.
+- Membuka halaman scanner.
 - Melakukan scan tiket.
 - Melihat data minimum peserta.
 - Mengonfirmasi penyerahan race pack.
 - Melihat hasil scan dalam session perangkat saat ini.
+
+**Tanpa autentikasi** — operator menggunakan `DEFAULT_OPERATOR_ID` dari konfigurasi environment. Semua perangkat yang mengakses halaman scanner dianggap memiliki hak akses.
 
 ### 6.2 Supervisor
 
@@ -356,30 +365,19 @@ QR berfungsi sebagai identifier, bukan sebagai autentikasi. Otorisasi tetap bera
 
 | Kode | Requirement |
 |---|---|
-| AUTH-001 | Sistem harus mewajibkan login untuk membuka scanner. |
-| AUTH-002 | Sistem harus menggunakan akun pada tabel `users` Laravel. |
-| AUTH-003 | Sistem harus mendukung login menggunakan username atau email sesuai data existing. |
-| AUTH-004 | Sistem harus memverifikasi hash password Laravel tanpa menyimpan atau mencatat password. |
-| AUTH-005 | Sistem harus menolak user tanpa role atau permission scanner yang diizinkan. |
-| AUTH-006 | Sistem harus menggunakan secure, HTTP-only, dan SameSite session cookie. |
-| AUTH-007 | Sistem harus memiliki idle session timeout yang dapat dikonfigurasi. |
-| AUTH-008 | Sistem harus menyediakan logout. |
-| AUTH-009 | Sistem tidak boleh mengubah user, password, role, atau permission Laravel. |
+| AUTH-001 | Sistem menggunakan `DEFAULT_OPERATOR_ID` dari konfigurasi environment. |
+| AUTH-002 | Sistem tidak memerlukan login atau session user. |
+| AUTH-003 | Semua perangkat yang mengakses halaman scanner dianggap memiliki hak akses. |
 
 ### 11.2 Kamera dan Input
 
 | Kode | Requirement |
 |---|---|
-| CAM-001 | Kamera smartphone harus menjadi metode input utama. |
-| CAM-002 | Sistem harus meminta kamera belakang melalui `facingMode: environment`. |
-| CAM-003 | Sistem harus memproses frame kamera di browser dan hanya mengirim teks hasil QR ke server. |
-| CAM-004 | Sistem tidak boleh menyimpan atau mengunggah foto dan video kamera. |
-| CAM-005 | Sistem harus menyediakan tombol aktifkan ulang kamera jika permission atau inisialisasi gagal. |
-| CAM-006 | Sistem harus menyediakan pergantian kamera jika perangkat memiliki lebih dari satu kamera. |
-| CAM-007 | Sistem sebaiknya menyediakan kontrol torch apabila browser dan perangkat mendukung. |
-| CAM-008 | Sistem harus mencegah QR yang sama dikirim berulang saat request diproses. |
-| CAM-009 | Sistem harus mendukung scanner USB/Bluetooth yang bertindak sebagai keyboard. |
-| CAM-010 | Sistem harus menyediakan input manual sebagai fallback. |
+| CAM-001 | Barcode scanner USB (keyboard wedge) menjadi metode input utama. |
+| CAM-002 | Input field harus auto-focus untuk menerima input dari barcode scanner. |
+| CAM-003 | Sistem memproses input teks dari barcode scanner dan mengirim ke server. |
+| CAM-004 | Sistem harus mendukung input manual sebagai fallback. |
+| CAM-005 | Input field harus tetap focus setelah scan berhasil. |
 
 ### 11.3 Validasi Ticket
 
@@ -433,37 +431,38 @@ QR berfungsi sebagai identifier, bukan sebagai autentikasi. Otorisasi tetap bera
 
 ## 12. User Interface
 
-### 12.1 Halaman Login
+### 12.1 Halaman Runner Display (`/`)
 
-Komponen minimum:
+Halaman display untuk TV/monitor dengan dark theme.
+
+Komponen:
 
 - Logo dan nama event.
-- Input username atau email.
-- Input password.
-- Tombol login.
-- Pesan error generik untuk kredensial invalid.
-- Informasi koneksi service.
+- Station number.
+- Idle state: "Scan QR Code Tiket Anda" dengan ikon QR.
+- Active state: BIB number besar, nama peserta, kategori, jersey, nomor order.
+- Animasi transisi saat data baru masuk.
+- Polling data setiap 500ms.
+- Station parameter via URL (`?station=1`).
 
-Pesan login tidak boleh membedakan secara terbuka antara user tidak ditemukan dan password salah.
+### 12.2 Halaman Runner Scanner (`/runner-scanner`)
 
-### 12.2 Halaman Scanner
+Halaman input untuk operator dengan light theme.
 
-Komponen minimum:
+Komponen:
 
-- Nama operator.
-- Tombol logout.
-- Preview kamera.
-- Area bidik QR.
-- Tombol aktifkan/nonaktifkan kamera.
-- Tombol ganti kamera.
-- Tombol torch jika tersedia.
-- Input scanner eksternal atau manual.
-- Indikator koneksi.
-- Riwayat hasil terakhir.
+- Logo dan nama event.
+- Station number.
+- Toggle Race Pack mode.
+- Status indicator (Ready).
+- Input field dengan auto-focus untuk barcode scanner.
+- Last scan result banner (success/error).
+- Riwayat scan (max 20 item).
+- Station parameter via URL (`?station=1`).
 
-### 12.3 Layar Verifikasi
+### 12.3 Layar Verifikasi (Race Pack Mode)
 
-Data yang ditampilkan:
+Data yang ditampilkan pada modal verifikasi:
 
 - Nomor order.
 - Nama participant.
@@ -471,28 +470,15 @@ Data yang ditampilkan:
 - BIB number.
 - Kategori ticket.
 - Ukuran jersey.
-- Status pickup.
-
-Data yang tidak ditampilkan secara default:
-
-- NIK atau identity.
-- File identitas.
-- Nomor telepon.
-- Email.
-- Kontak darurat.
-- Data pembayaran.
 
 ### 12.4 Status Visual
 
 | Kondisi | Warna | Feedback suara |
 |---|---|---|
-| QR dikenali dan menunggu konfirmasi | Biru | Beep pendek |
-| Pickup berhasil | Hijau | Nada sukses |
-| Sudah pernah diambil | Kuning | Nada peringatan |
-| Invalid, tidak ditemukan, atau belum paid | Merah | Nada error |
-| Service atau database tidak tersedia | Merah | Nada error |
+| Scan berhasil | Hijau | Beep pendek (880Hz) |
+| Error/invalid | Merah | Beep panjang (300Hz) |
 
-Warna tidak boleh menjadi satu-satunya indikator. Setiap status harus memiliki teks dan ikon yang jelas.
+Warna tidak boleh menjadi satu-satunya indikator. Setiap status harus memiliki teks yang jelas.
 
 ## 13. Dukungan Smartphone dan Kamera
 
@@ -667,18 +653,37 @@ Default MVP mengizinkan `admin` dan `super_admin`, serta menolak `customer`. Rol
 
 Endpoint final dapat disesuaikan saat technical design, tetapi MVP membutuhkan kontrak konseptual berikut.
 
-### 16.1 Login
+### 16.1 Display Data
 
 ```text
-POST /auth/login
+GET /api/display?station=1
 ```
 
-Request:
+Response sukses:
 
 ```json
 {
-  "identity": "operator",
-  "password": "********"
+  "outcome": "ok",
+  "data": {
+    "display": {
+      "order": {
+        "id": "01J...",
+        "number": "260605/WJA",
+        "race_pack_picked_up": false
+      },
+      "participant": {
+        "name": "Nama Peserta",
+        "bib_name": "NAMA BIB",
+        "bib_number": "T0033",
+        "jersey_size": "XS"
+      },
+      "ticket": {
+        "category": "10K"
+      },
+      "scanned_at": "2026-07-21T19:59:48+08:00"
+    },
+    "station": "1"
+  }
 }
 ```
 
@@ -692,7 +697,8 @@ Request:
 
 ```json
 {
-  "payload": "https://example.com/ticket/01J.../ticket.pdf"
+  "payload": "01KTAR98MT66XQXB4TQ10XBZNF",
+  "station": "1"
 }
 ```
 
@@ -954,15 +960,26 @@ Simulasi minimum:
 ### 23.1 Arsitektur
 
 ```text
-Smartphone Browser / PWA
-        |
-        | HTTPS
-        v
-Go Scanner Service
-        |
-        | PostgreSQL connection
-        v
-Database Existing Laravel
+┌─────────────────┐     ┌─────────────────┐
+│  Runner Display  │     │  Runner Scanner  │
+│  (TV/Monitor)    │     │  (HP/Tablet)     │
+│  /?station=1     │     │  /runner-scanner │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     │ HTTP/HTTPS
+                     v
+           ┌─────────────────┐
+           │  Go Scanner API  │
+           │  + In-Memory     │
+           │    Cache         │
+           └────────┬────────┘
+                    │ PostgreSQL
+                    v
+           ┌─────────────────┐
+           │  Database        │
+           │  Laravel         │
+           └─────────────────┘
 ```
 
 ### 23.2 Environment Variables
@@ -974,13 +991,16 @@ APP_ENV
 HTTP_ADDR
 PUBLIC_BASE_URL
 DATABASE_URL
+DB_HOST
+DB_PORT
+DB_DATABASE
+DB_USERNAME
+DB_PASSWORD
+DB_SSLMODE
 DB_MAX_CONNECTIONS
 DB_MIN_CONNECTIONS
 DB_STATEMENT_TIMEOUT
-SESSION_SECRET
-SESSION_IDLE_TIMEOUT
-SESSION_ABSOLUTE_TIMEOUT
-ALLOWED_SCANNER_ROLES
+DEFAULT_OPERATOR_ID
 APP_TIMEZONE
 LOG_LEVEL
 ```

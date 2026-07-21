@@ -1,6 +1,6 @@
 # Fenturun 2026 BIB & Race Pack Scanner
 
-Aplikasi web responsif berbasis Go untuk memvalidasi tiket peserta Fenturun 2026 dan mencatat penyerahan race pack. Aplikasi ditujukan bagi petugas lapangan menggunakan barcode scanner USB/Bluetooth dengan input manual sebagai metode cadangan.
+Aplikasi web responsif berbasis Go untuk memvalidasi tiket peserta Fenturun 2026 dan mencatat penyerahan race pack. Terdiri dari dua halaman: **Runner Display** (untuk TV/monitor) dan **Runner Scanner** (untuk operator).
 
 > Status: baseline implementasi MVP. Spesifikasi lengkap tersedia di [`docs/prd.md`](docs/prd.md).
 
@@ -14,20 +14,30 @@ Aplikasi web responsif berbasis Go untuk memvalidasi tiket peserta Fenturun 2026
 
 ## Fitur MVP
 
+### Runner Display (`/`)
+- Tampilan fullscreen untuk TV/monitor.
+- Menampilkan info peserta setelah scan (BIB, nama, kategori, jersey).
+- Idle state: "Scan QR Code Tiket Anda".
+- Polling data setiap 500ms.
+- Dark theme dengan animasi transisi.
+- Station parameter via URL (`?station=1`).
+
+### Runner Scanner (`/runner-scanner`)
 - **Tanpa login** — menggunakan operator default dari konfigurasi.
 - Input QR via barcode scanner USB (keyboard wedge) dengan auto-focus.
 - Input payload tiket secara manual.
-- Dukungan full ticket URL, relative ticket path, dan raw order ULID.
-- Validasi order, status pembayaran, soft delete, dan jumlah participant.
-- Tampilan data minimum peserta, BIB, kategori, dan ukuran jersey.
 - Mode **Display Only** — scan untuk menampilkan info peserta.
 - Mode **Race Pack** — scan dengan verifikasi penyerahan race pack.
-- Konfirmasi penyerahan race pack secara atomik (conditional update).
-- Deteksi race pack yang sudah pernah diambil.
 - Riwayat scan sementara dalam session browser (max 20 item).
 - Feedback visual dan suara (beep success/error).
-- UI match pattern Laravel `runner-scanner`.
 - Station parameter via URL (`?station=1`).
+
+### Backend
+- Dukungan full ticket URL, relative ticket path, dan raw order ULID.
+- Validasi order, status pembayaran, soft delete, dan jumlah participant.
+- Konfirmasi penyerahan race pack secara atomik (conditional update).
+- Deteksi race pack yang sudah pernah diambil.
+- In-memory cache untuk data display.
 - Endpoint health dan readiness.
 - Structured logging untuk operasional production.
 
@@ -75,15 +85,26 @@ Parser hanya mengambil identifier order. URL dari QR tidak dibuka atau dieksekus
 ## Arsitektur
 
 ```text
-Barcode Scanner / Browser
-        |
-        | HTTP (localhost)
-        v
-Go Scanner Service + Vite Dev Server
-        |
-        | PostgreSQL connection
-        v
-Database Existing Laravel
+┌─────────────────┐     ┌─────────────────┐
+│  Runner Display  │     │  Runner Scanner  │
+│  (TV/Monitor)    │     │  (HP/Tablet)     │
+│  /?station=1     │     │  /runner-scanner │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     │ HTTP
+                     v
+           ┌─────────────────┐
+           │  Go Scanner API  │
+           │  + In-Memory     │
+           │    Cache         │
+           └────────┬────────┘
+                    │ PostgreSQL
+                    v
+           ┌─────────────────┐
+           │  Database        │
+           │  Laravel         │
+           └─────────────────┘
 ```
 
 Service Go terhubung langsung ke PostgreSQL existing milik aplikasi Laravel Fenturun 2026. Service tidak membuat atau mengelola order, participant, ticket, pembayaran, user, role, maupun permission.
@@ -133,10 +154,45 @@ Tepat satu request boleh berhasil saat beberapa perangkat mengonfirmasi order ya
 Endpoint yang tersedia:
 
 ```text
+GET  /api/display               — Data display untuk station
 POST /api/scans/validate        — Validasi QR/tiket
 POST /api/orders/{ulid}/pickup  — Konfirmasi race pack pickup
 GET  /healthz                   — Health check
 GET  /readyz                    — Database readiness check
+```
+
+### Display Request
+
+```json
+GET /api/display?station=1
+```
+
+### Display Response
+
+```json
+{
+  "outcome": "ok",
+  "data": {
+    "display": {
+      "order": {
+        "id": "01JXXX...",
+        "number": "260605/WJA",
+        "race_pack_picked_up": false
+      },
+      "participant": {
+        "name": "Nama Peserta",
+        "bib_name": "NAMA BIB",
+        "bib_number": "T0033",
+        "jersey_size": "XS"
+      },
+      "ticket": {
+        "category": "10K"
+      },
+      "scanned_at": "2026-07-21T19:59:48+08:00"
+    },
+    "station": "1"
+  }
+}
 ```
 
 ### Validate Request
@@ -144,7 +200,8 @@ GET  /readyz                    — Database readiness check
 ```json
 POST /api/scans/validate
 {
-  "payload": "https://example.com/ticket/01JXXX.../ticket.pdf"
+  "payload": "01KTAR98MT66XQXB4TQ10XBZNF",
+  "station": "1"
 }
 ```
 
@@ -156,18 +213,18 @@ POST /api/scans/validate
   "message": "Tiket valid",
   "data": {
     "order": {
-      "id": "01JXXX...",
-      "number": "260622/MRV",
+      "id": "01KTAR98MT66XQXB4TQ10XBZNF",
+      "number": "260605/WJA",
       "race_pack_picked_up": false
     },
     "participant": {
-      "name": "Nama Peserta",
-      "bib_name": "NAMA BIB",
-      "bib_number": "S0001",
-      "jersey_size": "L"
+      "name": "Rizkyka Rumengan",
+      "bib_name": "KIKA",
+      "bib_number": "T0033",
+      "jersey_size": "XS"
     },
     "ticket": {
-      "category": "5K"
+      "category": "10K"
     }
   }
 }
@@ -213,9 +270,6 @@ DB_STATEMENT_TIMEOUT=3s
 # Operator Default (ULID user dari database)
 DEFAULT_OPERATOR_ID=01JXXXXXXXXXXXXXXXXXXXXXXX
 
-# CORS (untuk development dengan Vite dev server)
-ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174
-
 # Timezone tampilan
 APP_TIMEZONE=Asia/Makassar
 
@@ -240,11 +294,13 @@ go mod tidy
 # Install dependencies frontend
 cd web && npm install && cd ..
 
-# Jalankan Go backend + Vite dev server
-make dev
+# Jalankan Go backend
+make run
 ```
 
-Buka browser: `http://localhost:5173/?station=1`
+Buka browser:
+- **Display**: `http://localhost:3001/?station=1`
+- **Scanner**: `http://localhost:3001/runner-scanner?station=1`
 
 ### Production Build
 
@@ -268,12 +324,33 @@ go vet ./...
 
 ## UI Layout
 
-Tampilan mengikuti pattern Laravel `runner-scanner`:
+### Runner Display (Dark Theme)
 
 ```
 ┌──────────────────────────────────────────────┐
-│ [Logo]  Fenturun 2026            Station #1  │
-│         Runner Scanner     [Race Pack] 🔘    │
+│ [F]                           STATION #1     │
+│                                              │
+│          WELCOME, RUNNERS!                   │
+│                                              │
+│              10K                             │
+│                                              │
+│             T0033                            │
+│                                              │
+│        Rizkyka Rumengan                      │
+│          BIB: KIKA                           │
+│          Jersey: XS                          │
+│          260605/WJA                          │
+│                                              │
+│  © 2026 Fenturun 2026. Microsite By DEKA    │
+└──────────────────────────────────────────────┘
+```
+
+### Runner Scanner (Light Theme)
+
+```
+┌──────────────────────────────────────────────┐
+│ [F]  Runner Scanner             Station #1   │
+│              Race Pack 🔘   ● Ready          │
 ├──────────────────────────────────────────────┤
 │                                              │
 │  Scan QR Code Tiket                          │
@@ -283,7 +360,7 @@ Tampilan mengikuti pattern Laravel `runner-scanner`:
 │  Input otomatis dari barcode scanner USB     │
 │                                              │
 │  ┌─ Last Result ─────────────────────────┐   │
-│  │ ✅ #S0001 — Nama Peserta              │   │
+│  │ #T0033 — Rizkyka Rumengan             │   │
 │  └───────────────────────────────────────┘   │
 │                                              │
 │  ┌─ Riwayat Scan ────────────────────────┐   │
@@ -348,6 +425,7 @@ Target performa dalam kondisi jaringan dan database normal:
 
 ```text
 cmd/scanner/              — Entrypoint dan lifecycle
+internal/cache/           — In-memory cache untuk display data
 internal/config/          — Environment parsing/validation
 internal/store/           — pgx pool dan klasifikasi DB error
 internal/httpapi/         — router, middleware, response envelope
@@ -364,7 +442,8 @@ docs/                     — PRD, plan, schema contract
 
 1. **Fondasi** — Go module, konfigurasi, connection pool, HTTP server, health check, dan logging.
 2. **Scanner Core** — parser QR, query data, business validation, dan atomic pickup update.
-3. **UI** — input barcode scanner, mode toggle, riwayat scan, feedback visual/suara.
+3. **Display** — in-memory cache, polling, dark theme UI.
+4. **Scanner UI** — input barcode scanner, mode toggle, riwayat scan, feedback visual/suara.
 
 ## Batasan MVP
 
