@@ -1,0 +1,170 @@
+package scanner
+
+import (
+	"context"
+	"log/slog"
+)
+
+type Service struct {
+	repo              *Repository
+	logger            *slog.Logger
+	defaultOperatorID string
+}
+
+func NewService(repo *Repository, logger *slog.Logger, defaultOperatorID string) *Service {
+	return &Service{
+		repo:              repo,
+		logger:            logger,
+		defaultOperatorID: defaultOperatorID,
+	}
+}
+
+func (s *Service) DefaultOperatorID() string {
+	return s.defaultOperatorID
+}
+
+type ValidateResult struct {
+	Outcome     Outcome
+	Order       *OrderInfo
+	Participant *ParticipantInfo
+	Ticket      *TicketInfo
+}
+
+type OrderInfo struct {
+	ID                 string  `json:"id"`
+	Number             *string `json:"number,omitempty"`
+	Status             *string `json:"status,omitempty"`
+	RacePackPickedUp   bool    `json:"race_pack_picked_up"`
+	RacePackPickedUpAt *string `json:"race_pack_picked_up_at,omitempty"`
+}
+
+type ParticipantInfo struct {
+	Name       *string `json:"name"`
+	BibName    *string `json:"bib_name,omitempty"`
+	BIBNumber  *string `json:"bib_number,omitempty"`
+	UkuranJersey *string `json:"jersey_size,omitempty"`
+}
+
+type TicketInfo struct {
+	Category *string `json:"category,omitempty"`
+}
+
+func (s *Service) Validate(ctx context.Context, orderID string) (*ValidateResult, error) {
+	lookup, err := s.repo.LookupOrder(ctx, orderID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "lookup order failed", "error", err, "order_id_hash", hashID(orderID))
+		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
+	}
+
+	if lookup == nil {
+		return &ValidateResult{Outcome: OutcomeNotFound}, nil
+	}
+
+	if lookup.Status == nil || *lookup.Status != "paid" {
+		return &ValidateResult{Outcome: OutcomeNotPaid}, nil
+	}
+
+	if lookup.ParticipantCount == 0 {
+		return &ValidateResult{Outcome: OutcomeParticipantMissing}, nil
+	}
+
+	if lookup.ParticipantCount > 1 {
+		return &ValidateResult{Outcome: OutcomeMultipleParticipants}, nil
+	}
+
+	if lookup.RacePackPickedUpAt != nil {
+		pickedUpAt := lookup.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
+		return &ValidateResult{
+			Outcome: OutcomeAlreadyPickedUp,
+			Order: &OrderInfo{
+				ID:                 lookup.ID,
+				Number:             lookup.Number,
+				Status:             lookup.Status,
+				RacePackPickedUp:   true,
+				RacePackPickedUpAt: &pickedUpAt,
+			},
+		}, nil
+	}
+
+	return &ValidateResult{
+		Outcome: OutcomeValid,
+		Order: &OrderInfo{
+			ID:               lookup.ID,
+			Number:           lookup.Number,
+			Status:           lookup.Status,
+			RacePackPickedUp: false,
+		},
+		Participant: &ParticipantInfo{
+			Name:         lookup.ParticipantName,
+			BibName:      lookup.BibName,
+			BIBNumber:    lookup.BIBNumber,
+			UkuranJersey: lookup.UkuranJersey,
+		},
+		Ticket: &TicketInfo{
+			Category: lookup.TicketCategory,
+		},
+	}, nil
+}
+
+type PickupResultResponse struct {
+	Outcome    Outcome
+	PickedUpAt *string
+}
+
+func (s *Service) ConfirmPickup(ctx context.Context, orderID string, operatorID string) (*PickupResultResponse, error) {
+	result, err := s.repo.ConfirmPickup(ctx, orderID, operatorID)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "pickup confirm failed", "error", err, "order_id_hash", hashID(orderID))
+		return &PickupResultResponse{Outcome: OutcomeDatabaseUnavailable}, nil
+	}
+
+	if result == nil {
+		diag, err := s.repo.DiagnosePickup(ctx, orderID)
+		if err != nil {
+			s.logger.ErrorContext(ctx, "diagnose pickup failed", "error", err, "order_id_hash", hashID(orderID))
+			return &PickupResultResponse{Outcome: OutcomeInternalError}, nil
+		}
+
+		if diag == nil {
+			return &PickupResultResponse{Outcome: OutcomeNotFound}, nil
+		}
+
+		if diag.Status == nil || *diag.Status != "paid" {
+			return &PickupResultResponse{Outcome: OutcomeNotPaid}, nil
+		}
+
+		if diag.DeletedAt != nil {
+			return &PickupResultResponse{Outcome: OutcomeNotFound}, nil
+		}
+
+		if diag.ParticipantCount != 1 {
+			if diag.ParticipantCount == 0 {
+				return &PickupResultResponse{Outcome: OutcomeParticipantMissing}, nil
+			}
+			return &PickupResultResponse{Outcome: OutcomeMultipleParticipants}, nil
+		}
+
+		if diag.RacePackPickedUpAt != nil {
+			pickedUpAt := diag.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
+			return &PickupResultResponse{
+				Outcome:    OutcomeAlreadyPickedUp,
+				PickedUpAt: &pickedUpAt,
+			}, nil
+		}
+
+		return &PickupResultResponse{Outcome: OutcomeInternalError}, nil
+	}
+
+	pickedUpAt := result.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
+	return &PickupResultResponse{
+		Outcome:    OutcomePickedUp,
+		PickedUpAt: &pickedUpAt,
+	}, nil
+}
+
+func hashID(id string) string {
+	if len(id) > 4 {
+		return id[:2] + "***" + id[len(id)-2:]
+	}
+	return "***"
+}
