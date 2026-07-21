@@ -493,6 +493,67 @@ html, body {
   background: #e5e7eb;
 }
 
+/* Result Area */
+.result-area {
+  margin-top: 0.5rem;
+}
+
+.result-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.result-success {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.result-error {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.result-loading {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.result-icon-svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+
+.result-icon-svg.success {
+  color: #10b981;
+}
+
+.result-icon-svg.error {
+  color: #ef4444;
+}
+
+.result-text {
+  font-weight: 500;
+}
+
+.spinner-small {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid #dbeafe;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .header-inner {

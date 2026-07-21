@@ -38,9 +38,8 @@ interface HistoryItem {
 let station = 1;
 let racePackMode = false;
 let scanHistory: HistoryItem[] = [];
-let lastStatus: 'success' | 'error' | null = null;
-let lastMessage: string | null = null;
 let audioCtx: AudioContext | null = null;
+let isProcessing = false;
 
 const app = document.getElementById('app')!;
 
@@ -51,7 +50,9 @@ function init() {
   audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
   render();
-  focusInput();
+
+  document.addEventListener('click', () => focusInput());
+  setTimeout(() => focusInput(), 100);
 }
 
 function render() {
@@ -99,7 +100,7 @@ function render() {
         ` : ''}
 
         <form id="scanForm" class="scan-form">
-          <div class="scan-box ${lastStatus === 'success' ? 'scan-box-success' : ''} ${lastStatus === 'error' ? 'scan-box-error' : ''} ${!lastStatus && racePackMode ? 'scan-box-active' : ''}">
+          <div id="scanBox" class="scan-box">
             <label class="scan-label">
               ${racePackMode ? 'Scan QR Code untuk Penyerahan Race Pack' : 'Scan QR Code Tiket'}
             </label>
@@ -117,72 +118,16 @@ function render() {
           </div>
         </form>
 
-        ${lastStatus && lastMessage ? `
-          <div class="result-banner ${lastStatus === 'success' ? 'result-success' : 'result-error'}">
-            ${lastStatus === 'success' ? `
-              <svg class="result-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            ` : `
-              <svg class="result-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-            `}
-            <span class="result-text">${lastMessage}</span>
-          </div>
-        ` : ''}
+        <div id="resultArea" class="result-area" style="display:none;"></div>
 
-        <div class="history-card">
+        <div id="historyCard" class="history-card">
           <div class="history-header">
             <h2 class="history-title">Riwayat Scan</h2>
-            <span class="history-count">${scanHistory.length} scan</span>
+            <span id="historyCount" class="history-count">${scanHistory.length} scan</span>
           </div>
-
-          ${scanHistory.length > 0 ? `
-            <div class="history-table-wrapper">
-              <table class="history-table">
-                <thead>
-                  <tr>
-                    <th>Waktu</th>
-                    <th>No. Invoice</th>
-                    <th>Kategori</th>
-                    <th>BIB</th>
-                    <th>Nama</th>
-                    ${racePackMode ? '<th>Race Pack</th>' : ''}
-                  </tr>
-                </thead>
-                <tbody>
-                  ${scanHistory.map((scan, i) => `
-                    <tr class="${i === 0 ? 'history-row-first' : ''}">
-                      <td class="text-gray">${scan.time}</td>
-                      <td class="font-mono text-xs">${scan.orderNumber}</td>
-                      <td>
-                        <span class="badge">${scan.category}</span>
-                      </td>
-                      <td class="font-bold">${scan.bib}</td>
-                      <td>${scan.name}</td>
-                      ${racePackMode ? `
-                        <td>
-                          ${scan.racePack ? `
-                            <span class="badge badge-success">Diserahkan</span>
-                          ` : `
-                            <span class="badge badge-gray">&mdash;</span>
-                          `}
-                        </td>
-                      ` : ''}
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-          ` : `
-            <div class="history-empty">
-              <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-              </svg>
-              <p>Belum ada scan. Arahkan barcode scanner ke QR Code tiket.</p>
-            </div>
-          `}
+          <div id="historyContent">
+            ${renderHistoryContent()}
+          </div>
         </div>
       </main>
     </div>
@@ -195,13 +140,63 @@ function render() {
     focusInput();
   });
 
-  document.addEventListener('click', () => focusInput());
+  focusInput();
+}
+
+function renderHistoryContent(): string {
+  if (scanHistory.length === 0) {
+    return `
+      <div class="history-empty">
+        <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+        </svg>
+        <p>Belum ada scan. Arahkan barcode scanner ke QR Code tiket.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="history-table-wrapper">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Waktu</th>
+            <th>No. Invoice</th>
+            <th>Kategori</th>
+            <th>BIB</th>
+            <th>Nama</th>
+            ${racePackMode ? '<th>Race Pack</th>' : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${scanHistory.map((scan, i) => `
+            <tr class="${i === 0 ? 'history-row-first' : ''}">
+              <td class="text-gray">${scan.time}</td>
+              <td class="font-mono text-xs">${scan.orderNumber}</td>
+              <td><span class="badge">${scan.category}</span></td>
+              <td class="font-bold">${scan.bib}</td>
+              <td>${scan.name}</td>
+              ${racePackMode ? `
+                <td>
+                  ${scan.racePack ? `
+                    <span class="badge badge-success">Diserahkan</span>
+                  ` : `
+                    <span class="badge badge-gray">&mdash;</span>
+                  `}
+                </td>
+              ` : ''}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 function focusInput() {
   const input = document.getElementById('scanInput') as HTMLInputElement;
-  if (input) {
-    setTimeout(() => input.focus(), 50);
+  if (input && !isProcessing) {
+    input.focus();
   }
 }
 
@@ -230,32 +225,40 @@ function playBeep(type: 'success' | 'error') {
 
 async function handleSubmit(e: Event) {
   e.preventDefault();
+  if (isProcessing) return;
+
   const input = document.getElementById('scanInput') as HTMLInputElement;
   const payload = input.value.trim();
   input.value = '';
 
   if (!payload) {
-    setStatus('error', 'Input kosong');
+    showResult('error', 'Input kosong');
     return;
   }
 
   const orderId = extractOrderId(payload);
   if (!orderId) {
-    setStatus('error', 'QR Code tidak valid — format URL tidak dikenali');
+    showResult('error', 'QR Code tidak valid — format URL tidak dikenali');
     return;
   }
+
+  isProcessing = true;
+  showResult('loading', 'Memvalidasi tiket...');
 
   try {
     const res = await fetch(`${API_BASE}/api/scans/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payload }),
+      body: JSON.stringify({ payload, station: station.toString() }),
     });
 
     const data: ScanResult = await res.json();
     handleScanResult(data, payload);
   } catch {
-    setStatus('error', 'Koneksi bermasalah');
+    showResult('error', 'Koneksi bermasalah');
+  } finally {
+    isProcessing = false;
+    focusInput();
   }
 }
 
@@ -284,18 +287,14 @@ function handleScanResult(data: ScanResult, originalPayload: string) {
         const name = participant?.name || '-';
         const category = data.data?.ticket?.category || '-';
 
-        addToHistory(
-          order?.number || '-',
-          category,
-          bib,
-          name,
-          false
-        );
-        setStatus('success', `#${bib} — ${name}`);
+        addToHistory(order?.number || '-', category, bib, name, false);
+        showResult('success', `#${bib} — ${name}`);
+        playBeep('success');
       }
       break;
     case 'already_picked_up':
-      setStatus('error', message);
+      showResult('error', message);
+      playBeep('error');
       break;
     case 'picked_up':
       const pData = data.data;
@@ -308,10 +307,12 @@ function handleScanResult(data: ScanResult, originalPayload: string) {
         pName,
         true
       );
-      setStatus('success', message);
+      showResult('success', message);
+      playBeep('success');
       break;
     default:
-      setStatus('error', message);
+      showResult('error', message);
+      playBeep('error');
   }
 }
 
@@ -372,7 +373,8 @@ function showVerification(data: ScanResult, originalPayload: string) {
 }
 
 async function confirmPickup(orderId: string) {
-  setStatus('success', 'Mengonfirmasi pickup...');
+  isProcessing = true;
+  showResult('loading', 'Mengonfirmasi pickup...');
 
   try {
     const res = await fetch(`${API_BASE}/api/orders/${orderId}/pickup`, {
@@ -383,16 +385,46 @@ async function confirmPickup(orderId: string) {
     const data: ScanResult = await res.json();
     handleScanResult(data, orderId);
   } catch {
-    setStatus('error', 'Koneksi bermasalah. Jangan serahkan race pack.');
+    showResult('error', 'Koneksi bermasalah. Jangan serahkan race pack.');
+  } finally {
+    isProcessing = false;
+    focusInput();
   }
 }
 
-function setStatus(status: 'success' | 'error', message: string) {
-  lastStatus = status;
-  lastMessage = message;
-  playBeep(status);
-  render();
-  focusInput();
+function showResult(type: 'success' | 'error' | 'loading', message: string) {
+  const resultArea = document.getElementById('resultArea')!;
+  const scanBox = document.getElementById('scanBox')!;
+
+  scanBox.className = `scan-box ${type === 'success' ? 'scan-box-success' : type === 'error' ? 'scan-box-error' : ''}`;
+
+  let icon = '';
+  switch (type) {
+    case 'success':
+      icon = '<svg class="result-icon-svg success" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
+      break;
+    case 'error':
+      icon = '<svg class="result-icon-svg error" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" /></svg>';
+      break;
+    case 'loading':
+      icon = '<div class="spinner-small"></div>';
+      break;
+  }
+
+  resultArea.innerHTML = `
+    <div class="result-banner ${type === 'success' ? 'result-success' : type === 'error' ? 'result-error' : 'result-loading'}">
+      ${icon}
+      <span class="result-text">${message}</span>
+    </div>
+  `;
+  resultArea.style.display = 'block';
+
+  if (type !== 'loading') {
+    setTimeout(() => {
+      resultArea.style.display = 'none';
+      scanBox.className = 'scan-box';
+    }, 3000);
+  }
 }
 
 function addToHistory(orderNumber: string, category: string, bib: string, name: string, racePack: boolean) {
@@ -416,6 +448,11 @@ function addToHistory(orderNumber: string, category: string, bib: string, name: 
   if (scanHistory.length > 20) {
     scanHistory.length = 20;
   }
+
+  const historyCount = document.getElementById('historyCount');
+  const historyContent = document.getElementById('historyContent');
+  if (historyCount) historyCount.textContent = `${scanHistory.length} scan`;
+  if (historyContent) historyContent.innerHTML = renderHistoryContent();
 }
 
 init();

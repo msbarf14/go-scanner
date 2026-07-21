@@ -2,13 +2,18 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"time"
+
+	"fenturun2026-bib-scanner/internal/cache"
 )
 
 type Service struct {
 	repo              *Repository
 	logger            *slog.Logger
 	defaultOperatorID string
+	displayCache      *cache.Cache
 }
 
 func NewService(repo *Repository, logger *slog.Logger, defaultOperatorID string) *Service {
@@ -16,6 +21,7 @@ func NewService(repo *Repository, logger *slog.Logger, defaultOperatorID string)
 		repo:              repo,
 		logger:            logger,
 		defaultOperatorID: defaultOperatorID,
+		displayCache:      cache.New(),
 	}
 }
 
@@ -39,9 +45,9 @@ type OrderInfo struct {
 }
 
 type ParticipantInfo struct {
-	Name       *string `json:"name"`
-	BibName    *string `json:"bib_name,omitempty"`
-	BIBNumber  *string `json:"bib_number,omitempty"`
+	Name         *string `json:"name"`
+	BibName      *string `json:"bib_name,omitempty"`
+	BIBNumber    *string `json:"bib_number,omitempty"`
 	UkuranJersey *string `json:"jersey_size,omitempty"`
 }
 
@@ -49,7 +55,14 @@ type TicketInfo struct {
 	Category *string `json:"category,omitempty"`
 }
 
-func (s *Service) Validate(ctx context.Context, orderID string) (*ValidateResult, error) {
+type DisplayData struct {
+	Order       *OrderInfo       `json:"order"`
+	Participant *ParticipantInfo `json:"participant"`
+	Ticket      *TicketInfo      `json:"ticket"`
+	ScannedAt   string           `json:"scanned_at"`
+}
+
+func (s *Service) Validate(ctx context.Context, orderID string, station string) (*ValidateResult, error) {
 	lookup, err := s.repo.LookupOrder(ctx, orderID)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "lookup order failed", "error", err, "order_id_hash", hashID(orderID))
@@ -86,7 +99,7 @@ func (s *Service) Validate(ctx context.Context, orderID string) (*ValidateResult
 		}, nil
 	}
 
-	return &ValidateResult{
+	result := &ValidateResult{
 		Outcome: OutcomeValid,
 		Order: &OrderInfo{
 			ID:               lookup.ID,
@@ -103,7 +116,34 @@ func (s *Service) Validate(ctx context.Context, orderID string) (*ValidateResult
 		Ticket: &TicketInfo{
 			Category: lookup.TicketCategory,
 		},
-	}, nil
+	}
+
+	if station != "" {
+		displayData := &DisplayData{
+			Order:       result.Order,
+			Participant: result.Participant,
+			Ticket:      result.Ticket,
+			ScannedAt:   time.Now().Format(time.RFC3339),
+		}
+		cacheKey := fmt.Sprintf("display:%s", station)
+		s.displayCache.Set(cacheKey, displayData, 2*time.Minute)
+		s.logger.InfoContext(ctx, "display data cached", "station", station, "order_id_hash", hashID(orderID))
+	}
+
+	return result, nil
+}
+
+func (s *Service) GetDisplayData(station string) *DisplayData {
+	cacheKey := fmt.Sprintf("display:%s", station)
+	val, ok := s.displayCache.Get(cacheKey)
+	if !ok {
+		return nil
+	}
+	data, ok := val.(*DisplayData)
+	if !ok {
+		return nil
+	}
+	return data
 }
 
 type PickupResultResponse struct {

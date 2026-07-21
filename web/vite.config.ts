@@ -12,6 +12,12 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: '../internal/webui/dist',
       emptyOutDir: true,
+      rollupOptions: {
+        input: {
+          display: resolve(__dirname, 'runner-display.html'),
+          scanner: resolve(__dirname, 'runner-scanner.html'),
+        },
+      },
     },
     server: {
       proxy: {

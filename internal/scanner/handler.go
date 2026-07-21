@@ -18,6 +18,7 @@ func NewHandler(service *Service) *Handler {
 
 type validateRequest struct {
 	Payload string `json:"payload"`
+	Station string `json:"station,omitempty"`
 }
 
 func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +36,7 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.Validate(r.Context(), orderID)
+	result, err := h.service.Validate(r.Context(), orderID, req.Station)
 	if err != nil {
 		respond.JSON(w, r, OutcomeInternalError.HTTPStatus(), string(OutcomeInternalError), OutcomeInternalError.Message(), nil)
 		return
@@ -50,6 +51,20 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 		"order":       result.Order,
 		"participant": result.Participant,
 		"ticket":      result.Ticket,
+	})
+}
+
+func (h *Handler) Display(w http.ResponseWriter, r *http.Request) {
+	station := r.URL.Query().Get("station")
+	if station == "" {
+		station = "1"
+	}
+
+	data := h.service.GetDisplayData(station)
+
+	respond.JSON(w, r, http.StatusOK, "ok", "Display data", map[string]interface{}{
+		"display": data,
+		"station": station,
 	})
 }
 

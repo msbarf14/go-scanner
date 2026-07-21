@@ -34,20 +34,37 @@ func NewRouter(deps Deps) http.Handler {
 		WriteJSON(w, r, http.StatusOK, "ok", "Service siap", map[string]bool{"ok": true})
 	})
 
+	mux.HandleFunc("GET /api/display", deps.Scanner.Display)
 	mux.HandleFunc("POST /api/scans/validate", deps.Scanner.Validate)
 	mux.HandleFunc("POST /api/orders/{order_ulid}/pickup", deps.Scanner.Pickup)
 
-	webuiHandler := webui.Handler()
+	displayHandler := webui.DisplayHandler()
+	scannerHandler := webui.ScannerHandler()
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/api/") {
-			webuiHandler.ServeHTTP(w, r)
+		path := r.URL.Path
+
+		if path == "/" {
+			displayHandler.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/" {
-			webuiHandler.ServeHTTP(w, r)
+
+		if path == "/runner-scanner" || strings.HasPrefix(path, "/runner-scanner/") {
+			scannerHandler.ServeHTTP(w, r)
 			return
 		}
-		WriteJSON(w, r, http.StatusNotFound, "not_found", "Endpoint tidak ditemukan", nil)
+
+		if strings.HasPrefix(path, "/api/") {
+			WriteJSON(w, r, http.StatusNotFound, "not_found", "Endpoint tidak ditemukan", nil)
+			return
+		}
+
+		if strings.HasPrefix(path, "/assets/") || path == "/manifest.webmanifest" || path == "/service-worker.js" || strings.HasPrefix(path, "/icon-") {
+			webui.StaticHandler().ServeHTTP(w, r)
+			return
+		}
+
+		displayHandler.ServeHTTP(w, r)
 	})
 
 	return Chain(mux,
