@@ -23,6 +23,7 @@ type Config struct {
 	DBMinConnections       int32
 	DBStatementTimeout     time.Duration
 	SessionSecret          []byte
+	CSRFSecret             []byte
 	SessionIdleTimeout     time.Duration
 	SessionAbsoluteTimeout time.Duration
 	AllowedScannerRoles    []string
@@ -44,7 +45,7 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 
-	cfg.DatabaseURL, err = buildDatabaseURL()
+	cfg.DatabaseURL, err = buildDatabaseURL(cfg.AppEnv)
 	if err != nil {
 		return cfg, err
 	}
@@ -71,7 +72,11 @@ func Load() (Config, error) {
 		return cfg, errors.New("DB_STATEMENT_TIMEOUT must be positive")
 	}
 
-	cfg.SessionSecret, err = parseSecret(os.Getenv("SESSION_SECRET"), cfg.AppEnv)
+	cfg.SessionSecret, err = parseSecret("SESSION_SECRET", os.Getenv("SESSION_SECRET"), cfg.AppEnv)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.CSRFSecret, err = parseSecret("CSRF_SECRET", os.Getenv("CSRF_SECRET"), cfg.AppEnv)
 	if err != nil {
 		return cfg, err
 	}
@@ -115,9 +120,18 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-func buildDatabaseURL() (string, error) {
+func buildDatabaseURL(env string) (string, error) {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL != "" {
+		if env == "production" {
+			u, err := url.Parse(databaseURL)
+			if err != nil {
+				return "", fmt.Errorf("DATABASE_URL: %w", err)
+			}
+			if strings.TrimSpace(u.Query().Get("sslmode")) == "" {
+				return "", errors.New("DATABASE_URL must include sslmode in production")
+			}
+		}
 		return databaseURL, nil
 	}
 
@@ -126,6 +140,10 @@ func buildDatabaseURL() (string, error) {
 	database := strings.TrimSpace(os.Getenv("DB_DATABASE"))
 	username := strings.TrimSpace(os.Getenv("DB_USERNAME"))
 	password := os.Getenv("DB_PASSWORD")
+	sslmodeRaw := strings.TrimSpace(os.Getenv("DB_SSLMODE"))
+	if env == "production" && sslmodeRaw == "" {
+		return "", errors.New("DB_SSLMODE is required in production")
+	}
 	sslmode := getenv("DB_SSLMODE", "disable")
 
 	if database == "" {
@@ -200,13 +218,13 @@ func parseDuration(key string, fallback time.Duration) (time.Duration, error) {
 	return value, nil
 }
 
-func parseSecret(raw string, env string) ([]byte, error) {
+func parseSecret(key string, raw string, env string) ([]byte, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		if env == "production" {
-			return nil, errors.New("SESSION_SECRET is required in production")
+			return nil, fmt.Errorf("%s is required in production", key)
 		}
-		sum := sha256.Sum256([]byte("fenturun2026-scanner-development-session-secret"))
+		sum := sha256.Sum256([]byte("fenturun2026-scanner-development-" + strings.ToLower(key)))
 		return sum[:], nil
 	}
 
@@ -215,7 +233,7 @@ func parseSecret(raw string, env string) ([]byte, error) {
 		return decoded, nil
 	}
 	if len(raw) < 32 {
-		return nil, errors.New("SESSION_SECRET must be at least 32 bytes or base64 encoded 32 bytes")
+		return nil, fmt.Errorf("%s must be at least 32 bytes or base64 encoded 32 bytes", key)
 	}
 	return []byte(raw), nil
 }

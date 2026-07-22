@@ -58,7 +58,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session := h.sessions.New(user.ID, time.Now())
+	session, err := h.sessions.New(user.ID, time.Now())
+	if err != nil {
+		respond.JSON(w, r, http.StatusInternalServerError, "internal_error", "Gagal membuat session", nil)
+		return
+	}
 	if err := h.sessions.Write(w, session); err != nil {
 		respond.JSON(w, r, http.StatusInternalServerError, "internal_error", "Gagal membuat session", nil)
 		return

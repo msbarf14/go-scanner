@@ -9,6 +9,8 @@ import (
 	"fenturun2026-bib-scanner/internal/cache"
 )
 
+const maxDisplayCacheEntries = 128
+
 type Service struct {
 	repo         *Repository
 	logger       *slog.Logger
@@ -19,7 +21,7 @@ func NewService(repo *Repository, logger *slog.Logger) *Service {
 	return &Service{
 		repo:         repo,
 		logger:       logger,
-		displayCache: cache.New(),
+		displayCache: cache.NewWithMax(maxDisplayCacheEntries),
 	}
 }
 
@@ -155,12 +157,12 @@ func (s *Service) ConfirmPickup(ctx context.Context, orderID string, operatorID 
 			return &PickupResultResponse{Outcome: OutcomeNotFound}, nil
 		}
 
-		if diag.Status == nil || *diag.Status != "paid" {
-			return &PickupResultResponse{Outcome: OutcomeNotPaid}, nil
-		}
-
 		if diag.DeletedAt != nil {
 			return &PickupResultResponse{Outcome: OutcomeNotFound}, nil
+		}
+
+		if diag.Status == nil || *diag.Status != "paid" {
+			return &PickupResultResponse{Outcome: OutcomeNotPaid}, nil
 		}
 
 		if diag.ParticipantCount != 1 {

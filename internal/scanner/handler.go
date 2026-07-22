@@ -43,7 +43,14 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), OutcomeInvalidPayload.Message(), nil)
 		return
 	}
-	station = req.Station
+	var stationOK bool
+	station, stationOK = NormalizeStation(req.Station)
+	if !stationOK {
+		loggedOutcome = OutcomeInvalidPayload
+		station = "invalid"
+		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), "Station tidak valid", nil)
+		return
+	}
 
 	parsedOrderID, outcome := ParseOrderULID(req.Payload)
 	orderID = parsedOrderID
@@ -53,7 +60,7 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.Validate(r.Context(), orderID, req.Station)
+	result, err := h.service.Validate(r.Context(), orderID, station)
 	if err != nil {
 		loggedOutcome = OutcomeInternalError
 		respond.JSON(w, r, OutcomeInternalError.HTTPStatus(), string(OutcomeInternalError), OutcomeInternalError.Message(), nil)
@@ -74,9 +81,10 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Display(w http.ResponseWriter, r *http.Request) {
-	station := r.URL.Query().Get("station")
-	if station == "" {
-		station = "1"
+	station, ok := NormalizeStation(r.URL.Query().Get("station"))
+	if !ok {
+		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), "Station tidak valid", nil)
+		return
 	}
 
 	data := h.service.GetDisplayData(station)

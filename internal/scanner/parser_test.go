@@ -122,3 +122,31 @@ func TestParseOrderULID(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeStation(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		want   string
+		wantOK bool
+	}{
+		{name: "empty defaults to one", raw: "", want: "1", wantOK: true},
+		{name: "trim and normalize", raw: " 09 ", want: "9", wantOK: true},
+		{name: "max", raw: "99", want: "99", wantOK: true},
+		{name: "zero invalid", raw: "0", wantOK: false},
+		{name: "too high invalid", raw: "100", wantOK: false},
+		{name: "random invalid", raw: "station-a", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := NormalizeStation(tt.raw)
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if got != tt.want {
+				t.Fatalf("station = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

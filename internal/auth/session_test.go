@@ -1,6 +1,8 @@
 package auth
 
 import (
+	cryptorand "crypto/rand"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +12,10 @@ import (
 func TestSessionRoundTrip(t *testing.T) {
 	manager := NewSessionManager([]byte("01234567890123456789012345678901"), true, 30*time.Minute, 8*time.Hour)
 	now := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
-	session := manager.New("01J00000000000000000000001", now)
+	session, err := manager.New("01J00000000000000000000001", now)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
 
 	response := httptest.NewRecorder()
 	if err := manager.Write(response, session); err != nil {
@@ -44,8 +49,12 @@ func TestSessionCookieAttributes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manager := NewSessionManager([]byte("01234567890123456789012345678901"), tt.secure, 30*time.Minute, 8*time.Hour)
+			session, err := manager.New("01J00000000000000000000001", time.Now())
+			if err != nil {
+				t.Fatalf("new session: %v", err)
+			}
 			response := httptest.NewRecorder()
-			if err := manager.Write(response, manager.New("01J00000000000000000000001", time.Now())); err != nil {
+			if err := manager.Write(response, session); err != nil {
 				t.Fatalf("write session: %v", err)
 			}
 
@@ -67,10 +76,32 @@ func TestSessionCookieAttributes(t *testing.T) {
 	}
 }
 
+func TestSessionIDGenerationFailsClosed(t *testing.T) {
+	originalReader := cryptorand.Reader
+	cryptorand.Reader = failingReader{}
+	defer func() {
+		cryptorand.Reader = originalReader
+	}()
+
+	manager := NewSessionManager([]byte("01234567890123456789012345678901"), false, time.Minute, time.Hour)
+	if _, err := manager.New("01J00000000000000000000001", time.Now()); err == nil {
+		t.Fatal("expected session creation to fail when crypto/rand fails")
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("rand failed")
+}
+
 func TestSessionIdleExpiry(t *testing.T) {
 	manager := NewSessionManager([]byte("01234567890123456789012345678901"), false, time.Minute, time.Hour)
 	now := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
-	session := manager.New("01J00000000000000000000001", now)
+	session, err := manager.New("01J00000000000000000000001", now)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
 
 	response := httptest.NewRecorder()
 	if err := manager.Write(response, session); err != nil {

@@ -57,7 +57,7 @@ func run() error {
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Logger: logger, Auth: authHandler, Scanner: scannerHandler, BaseURL: cfg.PublicBaseURL, CSRFSecret: cfg.SessionSecret, Production: cfg.IsProduction()}),
+		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Logger: logger, Auth: authHandler, Scanner: scannerHandler, BaseURL: cfg.PublicBaseURL, CSRFSecret: cfg.CSRFSecret, Production: cfg.IsProduction()}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

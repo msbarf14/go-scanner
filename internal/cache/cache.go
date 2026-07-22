@@ -6,9 +6,10 @@ import (
 )
 
 type Cache struct {
-	mu    sync.RWMutex
-	items map[string]item
-	stop  chan struct{}
+	mu         sync.RWMutex
+	items      map[string]item
+	stop       chan struct{}
+	maxEntries int
 }
 
 type item struct {
@@ -17,9 +18,14 @@ type item struct {
 }
 
 func New() *Cache {
+	return NewWithMax(0)
+}
+
+func NewWithMax(maxEntries int) *Cache {
 	c := &Cache{
-		items: make(map[string]item),
-		stop:  make(chan struct{}),
+		items:      make(map[string]item),
+		stop:       make(chan struct{}),
+		maxEntries: maxEntries,
 	}
 	go c.cleanup()
 	return c
@@ -28,9 +34,20 @@ func New() *Cache {
 func (c *Cache) Set(key string, value interface{}, ttl time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	now := time.Now()
+	if c.maxEntries > 0 {
+		if _, exists := c.items[key]; !exists && len(c.items) >= c.maxEntries {
+			c.cleanupExpiredLocked(now)
+			if len(c.items) >= c.maxEntries {
+				c.deleteEarliestLocked()
+			}
+		}
+	}
+
 	c.items[key] = item{
 		value:     value,
-		expiresAt: time.Now().Add(ttl),
+		expiresAt: now.Add(ttl),
 	}
 }
 
@@ -60,16 +77,33 @@ func (c *Cache) cleanup() {
 		select {
 		case <-ticker.C:
 			c.mu.Lock()
-			now := time.Now()
-			for k, v := range c.items {
-				if now.After(v.expiresAt) {
-					delete(c.items, k)
-				}
-			}
+			c.cleanupExpiredLocked(time.Now())
 			c.mu.Unlock()
 		case <-c.stop:
 			return
 		}
+	}
+}
+
+func (c *Cache) cleanupExpiredLocked(now time.Time) {
+	for k, v := range c.items {
+		if now.After(v.expiresAt) {
+			delete(c.items, k)
+		}
+	}
+}
+
+func (c *Cache) deleteEarliestLocked() {
+	oldestKey := ""
+	var oldest time.Time
+	for key, item := range c.items {
+		if oldestKey == "" || item.expiresAt.Before(oldest) {
+			oldestKey = key
+			oldest = item.expiresAt
+		}
+	}
+	if oldestKey != "" {
+		delete(c.items, oldestKey)
 	}
 }
 

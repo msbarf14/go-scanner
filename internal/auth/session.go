@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
@@ -46,14 +47,18 @@ func NewSessionManager(secret []byte, secure bool, idleTimeout time.Duration, ab
 	}
 }
 
-func (m *SessionManager) New(userID string, now time.Time) Session {
+func (m *SessionManager) New(userID string, now time.Time) (Session, error) {
+	sessionID, err := randomHex(16)
+	if err != nil {
+		return Session{}, err
+	}
 	return Session{
 		UserID:       userID,
 		IssuedAt:     now.UTC(),
 		LastActivity: now.UTC(),
 		Version:      1,
-		SessionID:    randomHex(16),
-	}
+		SessionID:    sessionID,
+	}, nil
 }
 
 func (m *SessionManager) Read(r *http.Request, now time.Time) (Session, bool) {
@@ -130,10 +135,10 @@ func deriveKey(secret []byte, label string) []byte {
 	return mac.Sum(nil)
 }
 
-func randomHex(size int) string {
+func randomHex(size int) (string, error) {
 	buf := make([]byte, size)
-	if _, err := rand.Read(buf); err != nil {
-		return hex.EncodeToString(deriveKey([]byte(time.Now().Format(time.RFC3339Nano)), "fallback"))[:size*2]
+	if _, err := io.ReadFull(rand.Reader, buf); err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(buf)
+	return hex.EncodeToString(buf), nil
 }
