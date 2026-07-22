@@ -1,0 +1,64 @@
+import"./modulepreload-polyfill-B5Qt9EMX.js";const f="",y="https://r2.fenturun2026.com/assets".replace(/\/$/,""),b="11";let o=1,e=null,r=!1;const $=document.getElementById("app");function t(a){return`${`${y}/${a.replace(/^\/+/,"")}`}?v=${encodeURIComponent(b)}`}function s(a){return String(a??"").replace(/[&<>'"]/g,n=>{switch(n){case"&":return"&amp;";case"<":return"&lt;";case">":return"&gt;";case"'":return"&#39;";case'"':return"&quot;";default:return n}})}function w(){const a=new URLSearchParams(window.location.search);o=parseInt(a.get("station")||"1",10),l(),u(),setInterval(u,500)}async function u(){try{const a=await fetch(`${f}/api/display?station=${o}`);if(!a.ok)return;const i=(await a.json()).data.display;i&&(!e||i.order.id!==e.order.id)?(e=i,r=!1,l(),setTimeout(()=>{r=!0,l()},50)):!i&&e&&(e=null,r=!1,l())}catch{}}function l(){var c,d,p,v;const a=((c=e==null?void 0:e.ticket)==null?void 0:c.category)||"-",n=((d=e==null?void 0:e.participant)==null?void 0:d.name)||"-",i=((p=e==null?void 0:e.participant)==null?void 0:p.bib_name)||"",m=((v=e==null?void 0:e.participant)==null?void 0:v.bib_number)||"—",h=i||n,g=!!(i&&i!==n);$.innerHTML=`
+    <div class="display-container">
+      <div class="display-bg" aria-hidden="true">
+        <img src="${t("img/2026-runner-display.jpg")}" alt="" />
+        <div class="display-overlay"></div>
+      </div>
+
+      <div class="display-content">
+        <header class="display-header">
+          <div class="header-inner">
+            <div class="brand-official">
+              <div class="station-label">Station #${s(o)}</div>
+              <img src="${t("img/2026-official.png")}" class="official-logo" loading="lazy" alt="Official logo" />
+            </div>
+            <div class="brand-event">
+              <img src="${t("img/2026-logo.png")}" class="event-logo" loading="lazy" alt="Fenturun 2026" />
+            </div>
+          </div>
+        </header>
+
+        <main class="display-main">
+          ${e?`
+            <section class="runner-content ${r?"runner-content-show":"runner-content-hide"}" aria-live="polite">
+              <div class="runner-welcome-row">
+                <h1 class="welcome-title">WELCOME, RUNNER!</h1>
+                <div class="category-badge">${s(a)}</div>
+              </div>
+
+              <div class="runner-hero">
+                <div class="runner-copy">
+                  <div class="bib-number">${s(m)}</div>
+
+                  <div class="runner-name-block">
+                    <h2 class="runner-bib-name">BIB: ${s(h)}</h2>
+                    ${g?`<p class="runner-legal-name">${s(n)}</p>`:""}
+                  </div>
+                </div>
+              </div>
+            </section>
+          `:`
+            <section class="idle-content" aria-live="polite">
+              <div class="qr-icon-wrapper">
+                <svg class="qr-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                </svg>
+              </div>
+              <h2 class="idle-title">Scan QR Code Tiket Anda</h2>
+              <p class="idle-subtitle">Tunjukkan QR Code e-Ticket ke petugas scanner</p>
+            </section>
+          `}
+        </main>
+
+        <div class="partner-section">
+          <div class="partner-inner">
+            <img src="${t("img/2026-partner.png")}" class="partner-logo" loading="lazy" alt="Partner logo" />
+          </div>
+        </div>
+
+        <footer class="display-footer">
+          <p>&copy; 2026 Fenturun 2026. Microsite By <a href="https://deka.co.id" target="_blank" rel="noopener noreferrer">DEKA</a>.</p>
+        </footer>
+      </div>
+    </div>
+  `}w();

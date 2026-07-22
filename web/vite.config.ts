@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: '.',
+    envDir: resolve(__dirname, '..'),
     build: {
       outDir: '../internal/web/dist',
       emptyOutDir: true,
