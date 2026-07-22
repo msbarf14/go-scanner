@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
   return {
     root: '.',
     build: {
-      outDir: '../internal/webui/dist',
+      outDir: '../internal/web/dist',
       emptyOutDir: true,
       rollupOptions: {
         input: {

@@ -8,7 +8,7 @@ import (
 
 	"fenturun2026-bib-scanner/internal/scanner"
 	"fenturun2026-bib-scanner/internal/store"
-	"fenturun2026-bib-scanner/internal/webui"
+	"fenturun2026-bib-scanner/internal/web"
 )
 
 type Deps struct {
@@ -38,8 +38,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/scans/validate", deps.Scanner.Validate)
 	mux.HandleFunc("POST /api/orders/{order_ulid}/pickup", deps.Scanner.Pickup)
 
-	displayHandler := webui.DisplayHandler()
-	scannerHandler := webui.ScannerHandler()
+	displayHandler := web.DisplayHandler()
+	scannerHandler := web.ScannerHandler()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -60,7 +60,7 @@ func NewRouter(deps Deps) http.Handler {
 		}
 
 		if strings.HasPrefix(path, "/assets/") || path == "/manifest.webmanifest" || path == "/service-worker.js" || strings.HasPrefix(path, "/icon-") {
-			webui.StaticHandler().ServeHTTP(w, r)
+			web.StaticHandler().ServeHTTP(w, r)
 			return
 		}
 

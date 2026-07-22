@@ -27,7 +27,6 @@ type Config struct {
 	SessionAbsoluteTimeout  time.Duration
 	AllowedScannerRoles     []string
 	AllowedScannerPerms     []string
-	AllowedOrigins          []string
 	DefaultOperatorID       string
 	AppTimezone             *time.Location
 	LogLevel                slog.Level
@@ -98,7 +97,6 @@ func Load() (Config, error) {
 		return cfg, errors.New("ALLOWED_SCANNER_ROLES must not be empty")
 	}
 	cfg.AllowedScannerPerms = parseCSV(getenv("ALLOWED_SCANNER_PERMISSIONS", "scanner.access"))
-	cfg.AllowedOrigins = parseCSV(os.Getenv("ALLOWED_ORIGINS"))
 
 	cfg.DefaultOperatorID = strings.TrimSpace(os.Getenv("DEFAULT_OPERATOR_ID"))
 	if cfg.DefaultOperatorID == "" {
