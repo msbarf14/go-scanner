@@ -1,481 +1,212 @@
 # Fenturun 2026 BIB & Race Pack Scanner
 
-Aplikasi web responsif berbasis Go untuk memvalidasi tiket peserta Fenturun 2026 dan mencatat penyerahan race pack. Terdiri dari dua halaman: **Runner Display** (untuk TV/monitor) dan **Runner Scanner** (untuk operator).
+Aplikasi Go untuk memvalidasi tiket peserta, menampilkan data BIB, dan mencatat penyerahan race pack menggunakan database PostgreSQL milik aplikasi Laravel Fenturun 2026.
 
-> Status: scanner event-ready dengan Display Only publik, Race Pack terproteksi login Laravel, kamera/USB/manual input, dan hardening produksi P2. Spesifikasi lengkap tersedia di [`docs/prd.md`](docs/prd.md).
+## Halaman
 
-## Tujuan
+### Runner Display — `/`
 
-- Mempercepat validasi tiket dan penyerahan race pack.
-- Memastikan hanya order berstatus `paid` yang dapat diproses.
-- Mencegah race pack yang sama diserahkan lebih dari satu kali.
-- Mencatat operator dan waktu pengambilan pada database existing.
-- Tetap kompatibel dengan tiket yang diterbitkan aplikasi Laravel Fenturun 2026.
-
-## Fitur MVP
-
-### Runner Display (`/`)
-- Tampilan fullscreen untuk TV/monitor.
-- Menampilkan info peserta setelah scan (BIB, nama, kategori, jersey).
-- Idle state: "Scan QR Code Tiket Anda".
-- Polling data setiap 500ms.
-- Dark theme dengan animasi transisi.
-- Station parameter via URL (`?station=1`).
-
-### Runner Scanner (`/runner-scanner`)
-- Mode **Display Only** terbuka tanpa login untuk menampilkan info peserta ke Runner Display.
-- Toggle **Race Pack** membuka modal login operator memakai akun Laravel.
-- Pickup hanya bisa dilakukan saat session scanner aktif dan operator punya role/permission yang diizinkan.
-- Input QR via kamera lokal browser, barcode scanner USB/Bluetooth keyboard wedge, atau input manual.
-- Kamera memproses QR lokal di browser; video/frame tidak dikirim ke backend.
-- Riwayat scan lokal sementara dalam `sessionStorage` browser (max 20 item), bukan audit resmi.
-- Feedback visual, suara, dan status koneksi/readiness dinamis.
-- Station parameter via URL (`?station=1`), dinormalisasi ke rentang operasional yang valid.
-
-### Backend
-- Dukungan full ticket URL, relative ticket path, dan raw order ULID.
-- Validasi order, status pembayaran, soft delete, dan jumlah participant.
-- Konfirmasi penyerahan race pack secara atomik (conditional update).
-- Deteksi race pack yang sudah pernah diambil.
-- In-memory cache berbatas untuk data display per station.
-- Endpoint health dan readiness.
-- Structured logging non-PII untuk validate/pickup dan operasional production.
-
-## Aturan Bisnis Utama
-
-Berdasarkan data dan konfigurasi existing yang diverifikasi pada 20 Juli 2026, MVP menggunakan asumsi:
+Tampilan fullscreen untuk TV/monitor yang menampilkan peserta hasil scan berdasarkan station.
 
 ```text
-1 order = 1 participant = 1 BIB = 1 race pack
+https://scanner.example.com/?station=1
 ```
 
-Scanner tetap memeriksa asumsi tersebut pada setiap scan. Order hanya dapat diproses jika:
+### Runner Scanner — `/runner-scanner`
 
-- Payload QR dapat diparsing menjadi ULID order yang valid.
+Halaman scanner untuk laptop, HP, atau tablet.
+
+```text
+https://scanner.example.com/runner-scanner?station=1
+```
+
+Tersedia dua mode:
+
+- **Display Only** — dapat digunakan tanpa login dan tidak mengubah database.
+- **Race Pack** — wajib login memakai akun Laravel yang memiliki role atau permission scanner.
+
+Input QR didukung melalui:
+
+- Kamera browser.
+- Scanner USB/Bluetooth keyboard wedge.
+- Input manual.
+
+## Fitur Utama
+
+- Mendukung full ticket URL, relative ticket path, dan raw order ULID.
+- Memvalidasi status `paid`, soft delete, dan jumlah participant.
+- Menggunakan asumsi `1 order = 1 participant = 1 BIB = 1 race pack`.
+- Mencegah double pickup dengan conditional update atomik PostgreSQL.
+- Operator pickup selalu berasal dari session scanner.
+- Session Go terpisah dari session Laravel.
+- Proteksi CSRF, same-origin, secure cookie, dan login rate limiting.
+- Kamera memproses QR secara lokal; gambar/video tidak dikirim ke server.
+- Status koneksi dan kesiapan database ditampilkan pada scanner.
+- Riwayat lokal maksimal 20 item per station di `sessionStorage`; bukan audit resmi.
+- PWA hanya meng-cache shell dan asset statis. API dan pickup selalu membutuhkan jaringan.
+- Structured logging meminimalkan PII dan meredaksi identifier sensitif.
+
+## Aturan Pickup
+
+Pickup hanya berhasil jika:
+
 - Order ditemukan dan tidak soft-deleted.
 - `orders.status = 'paid'`.
 - Order memiliki tepat satu participant.
 - `orders.race_pack_picked_up_at IS NULL`.
+- Operator memiliki session dan hak akses scanner yang valid.
 
-Order tanpa participant atau dengan lebih dari satu participant ditolak dan harus diteruskan kepada supervisor.
-
-## Format QR yang Didukung
-
-Full ticket URL:
+Service hanya memperbarui kolom berikut:
 
 ```text
-https://domain.example/ticket/{order-ulid}/ticket.pdf
+orders.race_pack_picked_up_at
+orders.race_pack_picked_up_by
+orders.updated_at
 ```
 
-Relative path:
+Service tidak membuat migration atau tabel baru.
+
+## Menjalankan Secara Lokal
+
+Persyaratan:
+
+- Go 1.24+
+- Node.js 22+
+- PostgreSQL yang kompatibel dengan schema Laravel
+
+Salin konfigurasi:
+
+```bash
+cp .env.example .env
+```
+
+Install dependency dan jalankan:
+
+```bash
+npm --prefix web install
+make run
+```
+
+Default URL:
 
 ```text
-/ticket/{order-ulid}/ticket.pdf
-/ticket/{order-ulid}
+http://localhost:8080/
+http://localhost:8080/runner-scanner?station=1
 ```
 
-Raw order ULID:
+## Environment Production
 
-```text
-01JXXXXXXXXXXXXXXXXXXXXXXX
-```
-
-Parser hanya mengambil identifier order. URL dari QR tidak dibuka atau dieksekusi. Input dibatasi panjangnya dan ULID harus terdiri dari tepat 26 karakter Crockford Base32 yang valid.
-
-## Arsitektur
-
-```text
-┌─────────────────┐     ┌─────────────────┐
-│  Runner Display  │     │  Runner Scanner  │
-│  (TV/Monitor)    │     │  (HP/Tablet)     │
-│  /?station=1     │     │  /runner-scanner │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         └───────────┬───────────┘
-                     │ HTTP
-                     v
-           ┌─────────────────┐
-           │  Go Scanner API  │
-           │  + In-Memory     │
-           │    Cache         │
-           └────────┬────────┘
-                    │ PostgreSQL
-                    v
-           ┌─────────────────┐
-           │  Database        │
-           │  Laravel         │
-           └─────────────────┘
-```
-
-Service Go terhubung langsung ke PostgreSQL existing milik aplikasi Laravel Fenturun 2026. Service tidak membuat atau mengelola order, participant, ticket, pembayaran, user, role, maupun permission.
-
-### Akses Database
-
-Tabel yang dibaca:
-
-- `orders`
-- `participants`
-- `tickets`
-
-MVP hanya menulis kolom berikut pada tabel `orders`:
-
-```text
-race_pack_picked_up_at
-race_pack_picked_up_by
-updated_at
-```
-
-Tidak ada migration atau tabel baru pada MVP. Service menggunakan database role khusus dengan prinsip least privilege.
-
-## Pencegahan Double Pickup
-
-Konfirmasi pickup menggunakan conditional update atomik:
-
-```sql
-UPDATE orders
-SET
-    race_pack_picked_up_at = CURRENT_TIMESTAMP,
-    race_pack_picked_up_by = $1,
-    updated_at = CURRENT_TIMESTAMP
-WHERE id = $2
-  AND status = 'paid'
-  AND deleted_at IS NULL
-  AND race_pack_picked_up_at IS NULL
-RETURNING
-    id,
-    race_pack_picked_up_at,
-    race_pack_picked_up_by;
-```
-
-Tepat satu request boleh berhasil saat beberapa perangkat mengonfirmasi order yang sama. Waktu pickup berasal dari PostgreSQL, bukan dari jam perangkat operator.
-
-## API
-
-Endpoint yang tersedia:
-
-```text
-GET  /api/display               — Data display untuk station
-POST /api/scans/validate        — Validasi QR/tiket untuk Display Only atau modal Race Pack
-GET  /auth/session              — Status session scanner
-GET  /auth/csrf                 — Token CSRF untuk mutasi session/pickup
-POST /auth/login                — Login operator Laravel untuk Race Pack
-POST /auth/logout               — Logout session scanner
-POST /api/orders/{ulid}/pickup  — Konfirmasi race pack pickup, wajib session + CSRF
-GET  /healthz                   — Health check
-GET  /readyz                    — Database readiness check
-```
-
-### Display Request
-
-```json
-GET /api/display?station=1
-```
-
-### Display Response
-
-```json
-{
-  "outcome": "ok",
-  "data": {
-    "display": {
-      "order": {
-        "id": "01JXXX...",
-        "number": "260605/WJA",
-        "race_pack_picked_up": false
-      },
-      "participant": {
-        "name": "Nama Peserta",
-        "bib_name": "NAMA BIB",
-        "bib_number": "T0033",
-        "jersey_size": "XS"
-      },
-      "ticket": {
-        "category": "10K"
-      },
-      "scanned_at": "2026-07-21T19:59:48+08:00"
-    },
-    "station": "1"
-  }
-}
-```
-
-### Validate Request
-
-```json
-POST /api/scans/validate
-{
-  "payload": "01KTAR98MT66XQXB4TQ10XBZNF",
-  "station": "1"
-}
-```
-
-### Validate Response (Success)
-
-```json
-{
-  "outcome": "valid",
-  "message": "Tiket valid",
-  "data": {
-    "order": {
-      "id": "01KTAR98MT66XQXB4TQ10XBZNF",
-      "number": "260605/WJA",
-      "race_pack_picked_up": false
-    },
-    "participant": {
-      "name": "Rizkyka Rumengan",
-      "bib_name": "KIKA",
-      "bib_number": "T0033",
-      "jersey_size": "XS"
-    },
-    "ticket": {
-      "category": "10K"
-    }
-  }
-}
-```
-
-### Outcome Values
-
-```text
-valid                  — Tiket valid, menunggu konfirmasi
-picked_up             — Race pack berhasil diserahkan
-invalid_payload       — QR/input tidak valid
-not_found             — Order tidak ditemukan
-not_paid              — Order belum dibayar
-participant_missing   — Data participant tidak lengkap
-multiple_participants — Order multi-participant tidak didukung
-already_picked_up     — Race pack sudah pernah diambil
-database_unavailable  — Koneksi database bermasalah
-internal_error        — Error tak terduga
-```
-
-## Konfigurasi
-
-Environment variable:
+Contoh minimum:
 
 ```env
-APP_ENV=development
-HTTP_ADDR=:3001
-PUBLIC_BASE_URL=http://localhost:3001
+APP_ENV=production
+HTTP_ADDR=:8080
+PUBLIC_BASE_URL=https://scanner.example.com
 
-# PostgreSQL Connection
-DB_HOST=127.0.0.1
+DB_HOST=postgres-service-name
 DB_PORT=5432
 DB_DATABASE=fenturun2026
 DB_USERNAME=scanner_service
-DB_PASSWORD=your_password
+DB_PASSWORD=change-me
 DB_SSLMODE=disable
 
-# Connection Pool
 DB_MAX_CONNECTIONS=10
 DB_MIN_CONNECTIONS=1
 DB_STATEMENT_TIMEOUT=3s
 
-# Session dan CSRF. Production wajib eksplisit; generate masing-masing dengan: openssl rand -base64 32
-SESSION_SECRET=change-me-to-at-least-32-bytes-session-secret
-CSRF_SECRET=change-me-to-at-least-32-bytes-csrf-secret
+SESSION_SECRET=replace-with-openssl-base64-output
+CSRF_SECRET=replace-with-another-openssl-base64-output
 SESSION_IDLE_TIMEOUT=30m
 SESSION_ABSOLUTE_TIMEOUT=8h
 
-# Auth Laravel/Spatie
 ALLOWED_SCANNER_ROLES=admin,super_admin
 ALLOWED_SCANNER_PERMISSIONS=scanner.access
 
-# Timezone tampilan
 APP_TIMEZONE=Asia/Makassar
-
-# Logging dan proxy
 LOG_LEVEL=info
 TRUSTED_PROXY_CIDRS=
 ```
 
-Atau gunakan `DATABASE_URL` format:
+Generate secret terpisah:
+
+```bash
+openssl rand -base64 32
+openssl rand -base64 32
+```
+
+`DB_SSLMODE=disable` dapat digunakan jika Go dan PostgreSQL berada dalam private network Coolify yang sama dan port database tidak diekspos publik. Gunakan `require` atau mode TLS yang lebih ketat untuk database eksternal atau jaringan yang tidak dipercaya.
+
+Sebagai alternatif, gunakan `DATABASE_URL` dengan `sslmode` eksplisit:
 
 ```env
-DATABASE_URL=postgres://user:pass@localhost:5432/fenturun2026?sslmode=disable
+DATABASE_URL=postgres://user:password@host:5432/fenturun2026?sslmode=require
 ```
 
-## Cara Menjalankan
+## Deploy Coolify
 
-### Development
+Repository menyediakan multi-stage `Dockerfile` yang:
 
-```bash
-# Install dependencies Go
-go mod tidy
+1. Membangun frontend dengan Node.js.
+2. Membangun binary Go statis.
+3. Menjalankan aplikasi sebagai non-root user pada port `8080`.
 
-# Install dependencies frontend
-cd web && npm install && cd ..
+Konfigurasi Coolify:
 
-# Jalankan Go backend
-make run
+- Build pack: **Dockerfile**.
+- Port: `8080`.
+- Health check: `/healthz`.
+- Domain harus HTTPS agar kamera dan secure session berfungsi.
+- Gunakan `/readyz` untuk memeriksa koneksi database setelah container aktif.
+- Masukkan secret sebagai runtime environment variable, bukan build variable.
+
+Build variable frontend opsional:
+
+```env
+VITE_ASSET_BASE_URL=https://r2.fenturun2026.com/assets
+VITE_ASSET_VERSION=11
 ```
 
-Buka browser:
-- **Display**: `http://localhost:3001/?station=1`
-- **Scanner**: `http://localhost:3001/runner-scanner?station=1`
+## Endpoint
 
-### Production Build
+```text
+GET  /                         Runner Display
+GET  /runner-scanner           Runner Scanner
+GET  /api/display              Data display per station
+POST /api/scans/validate       Validasi tiket
+GET  /auth/session             Status session scanner
+GET  /auth/csrf                Token CSRF
+POST /auth/login               Login operator Race Pack
+POST /auth/logout              Logout scanner
+POST /api/orders/{ulid}/pickup Konfirmasi pickup
+GET  /healthz                  Process health
+GET  /readyz                   Database readiness
+```
+
+## Build dan Test
 
 ```bash
-# Build frontend + Go binary
+npm --prefix web run build
+go test ./...
+```
+
+Build binary lengkap:
+
+```bash
 make build
-
-# Jalankan
 ./bin/scanner
 ```
 
-### Testing
+## Batasan
 
-```bash
-# Jalankan semua test
-make test
+- Pickup wajib online; tidak ada antrean atau sinkronisasi offline.
+- Riwayat browser bukan audit resmi.
+- Tidak ada dashboard laporan atau pembatalan pickup di aplikasi ini.
+- Kamera production wajib diuji pada Chrome Android dan Safari iOS melalui HTTPS.
+- Database user scanner harus menggunakan least privilege.
 
-# Jalankan Go vet
-go vet ./...
-```
+## Dokumentasi Lanjutan
 
-## UI Layout
-
-### Runner Display (Dark Theme)
-
-```
-┌──────────────────────────────────────────────┐
-│ [F]                           STATION #1     │
-│                                              │
-│          WELCOME, RUNNERS!                   │
-│                                              │
-│              10K                             │
-│                                              │
-│             T0033                            │
-│                                              │
-│        Rizkyka Rumengan                      │
-│          BIB: KIKA                           │
-│          Jersey: XS                          │
-│          260605/WJA                          │
-│                                              │
-│  © 2026 Fenturun 2026. Microsite By DEKA    │
-└──────────────────────────────────────────────┘
-```
-
-### Runner Scanner (Light Theme)
-
-```
-┌──────────────────────────────────────────────┐
-│ [F]  Runner Scanner             Station #1   │
-│              Race Pack 🔘   ● Ready          │
-├──────────────────────────────────────────────┤
-│                                              │
-│  Scan QR Code Tiket                          │
-│  ┌────────────────────────────────────────┐  │
-│  │ [Input auto-focus untuk barcode scanner]│  │
-│  └────────────────────────────────────────┘  │
-│  Input otomatis dari barcode scanner USB     │
-│                                              │
-│  ┌─ Last Result ─────────────────────────┐   │
-│  │ #T0033 — Rizkyka Rumengan             │   │
-│  └───────────────────────────────────────┘   │
-│                                              │
-│  ┌─ Riwayat Scan ────────────────────────┐   │
-│  │ Waktu | Invoice | Kategori | BIB | Nama│  │
-│  └───────────────────────────────────────┘   │
-└──────────────────────────────────────────────┘
-```
-
-### Mode Display Only
-- Scan QR → tampilkan info peserta (nama, BIB, kategori, jersey).
-- Tidak ada konfirmasi pickup.
-
-### Mode Race Pack
-- Toggle Race Pack → modal login operator Laravel bila session scanner belum aktif.
-- Scan QR → tampilkan info peserta + modal verifikasi.
-- Konfirmasi → update database (`race_pack_picked_up_at/by`) memakai operator dari session, bukan input browser.
-- Modal verifikasi mengunci input scan dan tombol konfirmasi single-flight agar pickup tidak terkirim ganda.
-
-## Persyaratan Browser
-
-Target utama:
-
-- Chrome Android versi modern.
-- Safari iOS versi modern.
-- Browser dengan dukungan `getUserMedia` (untuk mode kamera).
-- Lebar viewport minimum sekitar 360 piksel.
-
-Production wajib menggunakan HTTPS dengan sertifikat yang dipercaya perangkat.
-
-## Keamanan dan Privasi
-
-- Koneksi PostgreSQL menggunakan TLS jika melewati jaringan yang tidak sepenuhnya dipercaya.
-- Seluruh query menggunakan parameter binding.
-- Database credential hanya tersedia pada service, tidak pernah dikirim ke browser.
-- Service fail closed ketika database atau koneksi tidak tersedia.
-- Status sukses hanya ditampilkan setelah database mengonfirmasi update.
-- Log tidak boleh berisi password, database URL, NIK, email, telepon, atau data sensitif lainnya.
-
-Data peserta yang boleh digunakan pada UI:
-
-- Nama participant.
-- BIB name.
-- BIB number.
-- Ukuran jersey.
-- Kategori ticket.
-- Nomor order.
-
-## Operasional
-
-Service menyediakan:
-
-- `/healthz` untuk health check process.
-- `/readyz` untuk memeriksa kesiapan koneksi database.
-- Structured log JSON pada production.
-- Request ID, outcome, status HTTP, dan durasi pada log.
-- Graceful shutdown dan penutupan koneksi database.
-
-Target performa dalam kondisi jaringan dan database normal:
-
-- P95 validasi scan maksimal 500 ms.
-- P95 konfirmasi pickup maksimal 500 ms.
-
-## Struktur Project
-
-```text
-cmd/scanner/              — Entrypoint dan lifecycle
-internal/cache/           — In-memory cache untuk display data
-internal/config/          — Environment parsing/validation
-internal/store/           — pgx pool dan klasifikasi DB error
-internal/httpapi/         — router, middleware, response envelope
-internal/scanner/         — QR parser, validation, pickup, outcomes
-internal/scanner/sql/     — SQL queries (lookup, pickup, diagnose)
-internal/web/             — Embedded frontend assets
-web/src/                  — TypeScript dan CSS
-web/public/               — Manifest, icon, service worker
-test/integration/         — Fixture dan PostgreSQL integration tests
-docs/                     — PRD, plan, schema contract
-```
-
-## Tahapan Implementasi
-
-1. **Fondasi** — Go module, konfigurasi, connection pool, HTTP server, health check, dan logging.
-2. **Scanner Core** — parser QR, query data, business validation, dan atomic pickup update.
-3. **Display** — in-memory cache, polling, dark theme UI.
-4. **Scanner UI** — input barcode scanner, mode toggle, riwayat scan, feedback visual/suara.
-
-## Batasan MVP
-
-MVP tidak mencakup:
-
-- Login penuh terpisah yang memblokir halaman Display Only.
-- Mode offline atau sinkronisasi pickup.
-- Migration dan tabel scanner baru.
-- Audit permanen setiap scan di PostgreSQL.
-- Dashboard laporan lintas station.
-- Pembatalan pickup oleh operator biasa.
-- Pengelolaan order, payment, participant, ticket, user, role, atau permission.
-- Aplikasi native Android atau iOS.
-- Penyimpanan gambar atau video kamera.
-
-## Dokumentasi
-
-- [`docs/prd.md`](docs/prd.md) — Product Requirements Document.
-- [`docs/plan.md`](docs/plan.md) — Technical implementation plan.
-- [`docs/schema-contract.md`](docs/schema-contract.md) — Database schema contract.
-- [`docs/traceability.md`](docs/traceability.md) — Requirement traceability matrix.
+- [`docs/prd.md`](docs/prd.md) — kebutuhan produk dan acceptance criteria.
+- [`docs/schema-contract.md`](docs/schema-contract.md) — kontrak schema database.
+- [`docs/traceability.md`](docs/traceability.md) — status requirement dan verifikasi.
+- [`docs/plan.md`](docs/plan.md) — rencana teknis dan fase implementasi.
