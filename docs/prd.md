@@ -447,6 +447,8 @@ Komponen:
 - Active state: BIB number besar, nama peserta, kategori, jersey, nomor order.
 - Animasi transisi saat data baru masuk.
 - Polling data setiap 500ms.
+- Input scanner USB/Bluetooth keyboard wedge selalu aktif dan auto-focus.
+- Input transparan secara default; `debug=1` menampilkan field input sebagai overlay untuk setup/manual test.
 - Station parameter via URL (`?station=1`).
 
 ### 12.2 Halaman Runner Scanner (`/runner-scanner`)

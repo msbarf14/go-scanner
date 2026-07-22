@@ -6,10 +6,16 @@ Aplikasi Go untuk memvalidasi tiket peserta, menampilkan data BIB, dan mencatat 
 
 ### Runner Display — `/`
 
-Tampilan fullscreen untuk TV/monitor yang menampilkan peserta hasil scan berdasarkan station.
+Tampilan fullscreen untuk TV/monitor yang menampilkan peserta berdasarkan station dan selalu menerima input scanner USB/Bluetooth keyboard wedge.
 
 ```text
 https://scanner.example.com/?station=1
+```
+
+Input scanner tersembunyi secara default. Tambahkan `debug=1` untuk menampilkan field input saat setup atau pengujian:
+
+```text
+https://scanner.example.com/?station=1&debug=1
 ```
 
 ### Runner Scanner — `/runner-scanner`

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fenturun-scanner-v3';
+const CACHE_NAME = 'fenturun-scanner-v4';
 const STATIC_ASSETS = [
   '/runner-scanner',
   '/runner-scanner.html',

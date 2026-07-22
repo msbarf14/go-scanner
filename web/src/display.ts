@@ -31,9 +31,16 @@ interface DisplayResponse {
   };
 }
 
+interface ValidateResponse {
+  outcome: string;
+}
+
 let station = 1;
+let debugScanner = false;
 let currentData: DisplayData | null = null;
 let show = false;
+let scanProcessing = false;
+let scannerInput: HTMLInputElement | null = null;
 
 const app = document.getElementById('app')!;
 
@@ -63,11 +70,88 @@ function escapeHtml(value: unknown): string {
 
 function init() {
   const params = new URLSearchParams(window.location.search);
-  station = parseInt(params.get('station') || '1', 10);
+  station = normalizeStation(params.get('station'));
+  debugScanner = params.get('debug') === '1';
 
   render();
-  fetchDisplayData();
-  setInterval(fetchDisplayData, 500);
+  mountScannerInput();
+  void fetchDisplayData();
+  setInterval(() => void fetchDisplayData(), 500);
+}
+
+function normalizeStation(value: string | null): number {
+  if (!value) return 1;
+
+  const parsed = Number(value.trim());
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 99 ? parsed : 1;
+}
+
+function mountScannerInput() {
+  const host = document.createElement('div');
+  host.className = `display-scanner ${debugScanner ? 'display-scanner-debug' : 'display-scanner-hidden'}`;
+
+  const form = document.createElement('form');
+  form.className = 'display-scanner-form';
+  form.setAttribute('aria-label', 'Scanner QR Runner Display');
+
+  const input = document.createElement('input');
+  input.id = 'displayScannerInput';
+  input.className = 'display-scanner-input';
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.placeholder = 'Scan atau masukkan QR Code tiket...';
+  input.setAttribute('aria-label', 'Input QR Code tiket');
+
+  form.appendChild(input);
+  host.appendChild(form);
+  document.body.appendChild(host);
+  scannerInput = input;
+
+  form.addEventListener('submit', (event) => void handleScanSubmit(event));
+  input.addEventListener('blur', () => setTimeout(focusScannerInput, 0));
+  document.addEventListener('click', focusScannerInput);
+  window.addEventListener('focus', focusScannerInput);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') focusScannerInput();
+  });
+
+  setTimeout(focusScannerInput, 0);
+  setInterval(focusScannerInput, 250);
+}
+
+function focusScannerInput() {
+  if (!scanProcessing && scannerInput && document.visibilityState === 'visible') scannerInput.focus();
+}
+
+async function handleScanSubmit(event: SubmitEvent) {
+  event.preventDefault();
+  if (scanProcessing || !scannerInput) return;
+
+  const payload = scannerInput.value.trim();
+  scannerInput.value = '';
+  if (!payload) {
+    focusScannerInput();
+    return;
+  }
+
+  scanProcessing = true;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/scans/validate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload, station: station.toString() }),
+    });
+    const data: ValidateResponse = await response.json();
+
+    if (data.outcome === 'valid' || data.outcome === 'already_picked_up') {
+      await fetchDisplayData();
+    }
+  } catch {
+  } finally {
+    scanProcessing = false;
+    focusScannerInput();
+  }
 }
 
 async function fetchDisplayData() {
