@@ -8,6 +8,7 @@ const HISTORY_LIMIT = 20;
 type AuthStatus = 'unknown' | 'anonymous' | 'authenticated';
 type ConnectionStatus = 'checking' | 'ready' | 'offline' | 'database_not_ready';
 type DisplayStatus = ConnectionStatus | 'processing' | 'verification_pending';
+type InputMode = 'scanner' | 'camera';
 
 interface ApiResponse<T = Record<string, unknown>> {
   outcome: string;
@@ -68,6 +69,7 @@ let csrfToken: string | null = null;
 let loginModal: HTMLElement | null = null;
 let activeVerification: VerificationState | null = null;
 let connectionStatus: ConnectionStatus = navigator.onLine ? 'checking' : 'offline';
+let inputMode: InputMode = 'scanner';
 let qrReader: BrowserQRCodeReader | null = null;
 let cameraControls: IScannerControls | null = null;
 let cameraRequested = false;
@@ -171,30 +173,49 @@ function render() {
 
         <form id="scanForm" class="scan-form">
           <div id="scanBox" class="scan-box">
-            <label class="scan-label">
-              ${racePackMode ? 'Scan QR Code untuk Penyerahan Race Pack' : 'Scan QR Code Tiket'}
-            </label>
-            <input
-              id="scanInput"
-              type="text"
-              autocomplete="off"
-              autofocus
-              placeholder="Arahkan barcode scanner ke QR Code tiket..."
-              class="scan-input"
-            />
-            <p class="scan-hint">
-              Input otomatis dari barcode scanner USB. Klik di mana saja untuk re-focus.
-            </p>
-
-            <div class="camera-panel">
-              <div class="camera-actions">
-                <button id="cameraToggle" class="btn btn-secondary btn-camera" type="button" ${cameraStarting ? 'disabled' : ''}>
-                  ${escapeHtml(cameraButtonLabel())}
-                </button>
-                <span id="cameraStatus" class="camera-status ${cameraActive ? 'camera-status-active' : ''}">${escapeHtml(cameraStatusMessage)}</span>
-              </div>
-              <video id="cameraPreview" class="camera-preview ${cameraActive ? 'camera-preview-active' : ''}" muted playsinline></video>
+            <div class="input-mode-control" role="group" aria-label="Pilih mode input QR">
+              <button
+                id="scannerModeButton"
+                class="input-mode-button ${inputMode === 'scanner' ? 'input-mode-button-active' : ''}"
+                type="button"
+                aria-pressed="${inputMode === 'scanner'}"
+                ${modeSwitchDisabled() ? 'disabled' : ''}
+              >Scanner</button>
+              <button
+                id="cameraModeButton"
+                class="input-mode-button ${inputMode === 'camera' ? 'input-mode-button-active' : ''}"
+                type="button"
+                aria-pressed="${inputMode === 'camera'}"
+                ${modeSwitchDisabled() ? 'disabled' : ''}
+              >Kamera</button>
             </div>
+
+            ${inputMode === 'scanner' ? `
+              <div class="scanner-mode-panel">
+                <label class="scan-label" for="scanInput">
+                  ${racePackMode ? 'Scan QR Code untuk Penyerahan Race Pack' : 'Scan QR Code Tiket'}
+                </label>
+                <input
+                  id="scanInput"
+                  type="text"
+                  autocomplete="off"
+                  autofocus
+                  placeholder="Arahkan barcode scanner ke QR Code tiket..."
+                  class="scan-input"
+                />
+                <p class="scan-hint">
+                  Gunakan scanner USB/Bluetooth atau ketik payload secara manual. Klik di mana saja untuk re-focus.
+                </p>
+              </div>
+            ` : `
+              <div class="camera-panel">
+                <label class="scan-label">
+                  ${racePackMode ? 'Scan Kamera untuk Penyerahan Race Pack' : 'Scan QR Code dengan Kamera'}
+                </label>
+                <span id="cameraStatus" class="camera-status ${cameraActive ? 'camera-status-active' : ''}">${escapeHtml(cameraStatusMessage)}</span>
+                <video id="cameraPreview" class="camera-preview ${cameraActive ? 'camera-preview-active' : ''}" muted playsinline></video>
+              </div>
+            `}
           </div>
         </form>
 
@@ -222,9 +243,10 @@ function render() {
     void handleRacePackToggle(checked);
   });
   document.getElementById('logoutButton')?.addEventListener('click', () => void logout());
-  document.getElementById('cameraToggle')?.addEventListener('click', () => void toggleCamera());
+  document.getElementById('scannerModeButton')?.addEventListener('click', () => void setInputMode('scanner'));
+  document.getElementById('cameraModeButton')?.addEventListener('click', () => void setInputMode('camera'));
 
-  if (cameraRequested && !cameraControls && !cameraStarting) void startCamera();
+  if (inputMode === 'camera' && cameraRequested && !cameraControls && !cameraStarting) void startCamera();
   focusInput();
 }
 
@@ -368,8 +390,8 @@ function renderHistoryContent(): string {
 }
 
 function focusInput() {
-  if (loginModal || activeVerification) return;
-  const input = document.getElementById('scanInput') as HTMLInputElement;
+  if (inputMode !== 'scanner' || loginModal || activeVerification) return;
+  const input = document.getElementById('scanInput') as HTMLInputElement | null;
   if (input && !isProcessing) input.focus();
 }
 
@@ -377,26 +399,23 @@ function setScannerControlsDisabled(disabled: boolean) {
   const input = document.getElementById('scanInput') as HTMLInputElement | null;
   const toggle = document.getElementById('racePackToggle') as HTMLInputElement | null;
   const logoutButton = document.getElementById('logoutButton') as HTMLButtonElement | null;
+  const scannerModeButton = document.getElementById('scannerModeButton') as HTMLButtonElement | null;
+  const cameraModeButton = document.getElementById('cameraModeButton') as HTMLButtonElement | null;
 
   if (input) input.disabled = disabled;
   if (toggle) toggle.disabled = disabled;
   if (logoutButton) logoutButton.disabled = disabled;
-}
-
-function cameraButtonLabel(): string {
-  if (cameraStarting) return 'Membuka kamera...';
-  return cameraActive ? 'Stop Kamera' : 'Start Kamera';
+  if (scannerModeButton) scannerModeButton.disabled = disabled;
+  if (cameraModeButton) cameraModeButton.disabled = disabled;
 }
 
 function updateCameraUI() {
-  const button = document.getElementById('cameraToggle') as HTMLButtonElement | null;
   const status = document.getElementById('cameraStatus');
   const preview = document.getElementById('cameraPreview');
+  const scannerModeButton = document.getElementById('scannerModeButton') as HTMLButtonElement | null;
+  const cameraModeButton = document.getElementById('cameraModeButton') as HTMLButtonElement | null;
+  const switchDisabled = modeSwitchDisabled();
 
-  if (button) {
-    button.disabled = cameraStarting;
-    button.textContent = cameraButtonLabel();
-  }
   if (status) {
     status.textContent = cameraStatusMessage;
     status.className = `camera-status ${cameraActive ? 'camera-status-active' : ''}`;
@@ -404,21 +423,34 @@ function updateCameraUI() {
   if (preview) {
     preview.className = `camera-preview ${cameraActive ? 'camera-preview-active' : ''}`;
   }
+  if (scannerModeButton) scannerModeButton.disabled = switchDisabled;
+  if (cameraModeButton) cameraModeButton.disabled = switchDisabled;
 }
 
 function cameraUnsafe(): boolean {
   return Boolean(isProcessing || activeVerification || loginModal);
 }
 
-async function toggleCamera() {
-  if (cameraControls || cameraStarting) {
+function modeSwitchDisabled(): boolean {
+  return cameraStarting || cameraUnsafe();
+}
+
+function setInputMode(mode: InputMode) {
+  if (mode === inputMode || modeSwitchDisabled()) return;
+
+  if (mode === 'scanner') {
+    inputMode = 'scanner';
     cameraRequested = false;
-    stopCameraStream('Kamera dimatikan. USB/manual tetap aktif.');
+    stopCameraStream('Kamera dimatikan. Scanner/manual aktif.');
+    render();
+    focusInput();
     return;
   }
 
+  inputMode = 'camera';
   cameraRequested = true;
-  await startCamera();
+  cameraStatusMessage = 'Memulai kamera...';
+  render();
 }
 
 async function withCameraTimeout(promise: Promise<IScannerControls>): Promise<IScannerControls> {
@@ -431,12 +463,11 @@ async function withCameraTimeout(promise: Promise<IScannerControls>): Promise<IS
 }
 
 async function startCamera() {
-  if (!cameraRequested || cameraStarting || cameraControls || cameraUnsafe()) return;
+  if (inputMode !== 'camera' || !cameraRequested || cameraStarting || cameraControls || cameraUnsafe()) return;
 
   const preview = document.getElementById('cameraPreview') as HTMLVideoElement | null;
   if (!qrReader || !preview || !navigator.mediaDevices?.getUserMedia) {
-    cameraStatusMessage = 'Kamera tidak tersedia di browser/perangkat ini.';
-    updateCameraUI();
+    returnToScanner('Kamera tidak tersedia di browser/perangkat ini. Scanner/manual diaktifkan.');
     return;
   }
 
@@ -444,9 +475,11 @@ async function startCamera() {
   cameraStatusMessage = 'Meminta izin kamera...';
   updateCameraUI();
 
+  let failureMessage = '';
+
   try {
-    cameraControls = await withCameraTimeout(qrReader.decodeFromVideoDevice(undefined, preview, (result) => {
-      if (!result) return;
+    const controls = await withCameraTimeout(qrReader.decodeFromVideoDevice(undefined, preview, (result) => {
+      if (!result || inputMode !== 'camera' || !cameraRequested) return;
       const payload = result.getText();
       const now = Date.now();
       if (payload === lastCameraPayload && now - lastCameraScanAt < 2000) return;
@@ -454,19 +487,29 @@ async function startCamera() {
       lastCameraScanAt = now;
       void submitScanPayload(payload);
     }));
+
+    if (inputMode !== 'camera' || !cameraRequested || cameraUnsafe()) {
+      controls.stop();
+      cameraStatusMessage = 'Kamera dijeda sementara.';
+      return;
+    }
+
+    cameraControls = controls;
     cameraActive = true;
     cameraStatusMessage = 'Kamera aktif. Arahkan ke QR tiket.';
   } catch (caught) {
-    cameraRequested = false;
-    BrowserCodeReader.releaseAllStreams();
-    cameraStatusMessage = caught instanceof DOMException && caught.name === 'NotAllowedError'
-      ? 'Izin kamera ditolak. Gunakan USB/manual atau izinkan kamera browser.'
+    failureMessage = caught instanceof DOMException && caught.name === 'NotAllowedError'
+      ? 'Izin kamera ditolak. Scanner/manual diaktifkan.'
       : caught instanceof Error && caught.message === 'camera_timeout'
-        ? 'Kamera terlalu lama merespons. Gunakan USB/manual atau coba lagi.'
-        : 'Kamera tidak bisa dibuka. USB/manual tetap aktif.';
+        ? 'Kamera terlalu lama merespons. Scanner/manual diaktifkan.'
+        : 'Kamera tidak bisa dibuka. Scanner/manual diaktifkan.';
   } finally {
     cameraStarting = false;
-    updateCameraUI();
+    if (failureMessage) {
+      returnToScanner(failureMessage);
+    } else {
+      updateCameraUI();
+    }
   }
 }
 
@@ -478,12 +521,25 @@ function stopCameraStream(message: string) {
   updateCameraUI();
 }
 
+function returnToScanner(message: string) {
+  cameraRequested = false;
+  cameraControls?.stop();
+  cameraControls = null;
+  BrowserCodeReader.releaseAllStreams();
+  cameraActive = false;
+  cameraStatusMessage = message;
+  inputMode = 'scanner';
+  render();
+  showResult('error', message);
+  focusInput();
+}
+
 function pauseCameraForUnsafeState() {
   if (cameraControls) stopCameraStream('Kamera dijeda sementara.');
 }
 
 function resumeCameraIfSafe() {
-  if (cameraRequested && !cameraControls && !cameraStarting && !cameraUnsafe()) void startCamera();
+  if (inputMode === 'camera' && cameraRequested && !cameraControls && !cameraStarting && !cameraUnsafe()) void startCamera();
 }
 
 function playBeep(type: 'success' | 'error') {
@@ -706,7 +762,11 @@ async function logout() {
 
 async function handleSubmit(event: Event) {
   event.preventDefault();
-  const input = document.getElementById('scanInput') as HTMLInputElement;
+  if (inputMode !== 'scanner') return;
+
+  const input = document.getElementById('scanInput') as HTMLInputElement | null;
+  if (!input) return;
+
   const payload = input.value.trim();
   input.value = '';
   await submitScanPayload(payload);

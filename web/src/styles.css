@@ -264,22 +264,59 @@ html, body {
   color: #9ca3af;
 }
 
+.input-mode-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  max-width: 22rem;
+  margin-bottom: 1rem;
+  padding: 0.25rem;
+  border-radius: 0.625rem;
+  background: #f3f4f6;
+}
+
+.input-mode-button {
+  padding: 0.625rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: #6b7280;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+.input-mode-button:hover:not(:disabled) {
+  color: #374151;
+}
+
+.input-mode-button:focus-visible {
+  outline: 2px solid #fc0012;
+  outline-offset: 2px;
+}
+
+.input-mode-button-active {
+  border-color: #e5e7eb;
+  background: white;
+  color: #fc0012;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+}
+
+.input-mode-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.scanner-mode-panel,
 .camera-panel {
-  margin-top: 1rem;
+  min-height: 7.5rem;
+}
+
+.camera-panel {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-}
-
-.camera-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.btn-camera {
-  width: auto;
 }
 
 .camera-status {
