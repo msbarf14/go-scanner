@@ -14,6 +14,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"fenturun2026-bib-scanner/internal/auth"
 	"fenturun2026-bib-scanner/internal/config"
 	"fenturun2026-bib-scanner/internal/httpapi"
 	"fenturun2026-bib-scanner/internal/scanner"
@@ -45,13 +46,18 @@ func run() error {
 	}
 	defer db.Close()
 
+	authRepo := auth.NewRepository(db.Pool)
+	authService := auth.NewService(authRepo, cfg.AllowedScannerRoles, cfg.AllowedScannerPerms)
+	sessionManager := auth.NewSessionManager(cfg.SessionSecret, cfg.PublicBaseURL.Scheme == "https", cfg.SessionIdleTimeout, cfg.SessionAbsoluteTimeout)
+	authHandler := auth.NewHandler(authService, sessionManager, cfg.TrustedProxyCIDRs)
+
 	scannerRepo := scanner.NewRepository(db.Pool)
-	scannerService := scanner.NewService(scannerRepo, logger, cfg.DefaultOperatorID)
-	scannerHandler := scanner.NewHandler(scannerService)
+	scannerService := scanner.NewService(scannerRepo, logger)
+	scannerHandler := scanner.NewHandler(scannerService, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Logger: logger, Scanner: scannerHandler, BaseURL: cfg.PublicBaseURL, Production: cfg.IsProduction()}),
+		Handler:           httpapi.NewRouter(httpapi.Deps{Store: db, Logger: logger, Auth: authHandler, Scanner: scannerHandler, BaseURL: cfg.PublicBaseURL, CSRFSecret: cfg.SessionSecret, Production: cfg.IsProduction()}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,

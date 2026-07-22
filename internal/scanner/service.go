@@ -10,23 +10,17 @@ import (
 )
 
 type Service struct {
-	repo              *Repository
-	logger            *slog.Logger
-	defaultOperatorID string
-	displayCache      *cache.Cache
+	repo         *Repository
+	logger       *slog.Logger
+	displayCache *cache.Cache
 }
 
-func NewService(repo *Repository, logger *slog.Logger, defaultOperatorID string) *Service {
+func NewService(repo *Repository, logger *slog.Logger) *Service {
 	return &Service{
-		repo:              repo,
-		logger:            logger,
-		defaultOperatorID: defaultOperatorID,
-		displayCache:      cache.New(),
+		repo:         repo,
+		logger:       logger,
+		displayCache: cache.New(),
 	}
-}
-
-func (s *Service) DefaultOperatorID() string {
-	return s.defaultOperatorID
 }
 
 type ValidateResult struct {
@@ -85,27 +79,13 @@ func (s *Service) Validate(ctx context.Context, orderID string, station string) 
 		return &ValidateResult{Outcome: OutcomeMultipleParticipants}, nil
 	}
 
-	if lookup.RacePackPickedUpAt != nil {
-		pickedUpAt := lookup.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
-		return &ValidateResult{
-			Outcome: OutcomeAlreadyPickedUp,
-			Order: &OrderInfo{
-				ID:                 lookup.ID,
-				Number:             lookup.Number,
-				Status:             lookup.Status,
-				RacePackPickedUp:   true,
-				RacePackPickedUpAt: &pickedUpAt,
-			},
-		}, nil
-	}
-
 	result := &ValidateResult{
 		Outcome: OutcomeValid,
 		Order: &OrderInfo{
 			ID:               lookup.ID,
 			Number:           lookup.Number,
 			Status:           lookup.Status,
-			RacePackPickedUp: false,
+			RacePackPickedUp: lookup.RacePackPickedUpAt != nil,
 		},
 		Participant: &ParticipantInfo{
 			Name:         lookup.ParticipantName,
@@ -118,12 +98,18 @@ func (s *Service) Validate(ctx context.Context, orderID string, station string) 
 		},
 	}
 
+	if lookup.RacePackPickedUpAt != nil {
+		pickedUpAt := lookup.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
+		result.Outcome = OutcomeAlreadyPickedUp
+		result.Order.RacePackPickedUpAt = &pickedUpAt
+	}
+
 	if station != "" {
 		displayData := &DisplayData{
 			Order:       result.Order,
 			Participant: result.Participant,
 			Ticket:      result.Ticket,
-			ScannedAt:   time.Now().Format(time.RFC3339),
+			ScannedAt:   time.Now().Format(time.RFC3339Nano),
 		}
 		cacheKey := fmt.Sprintf("display:%s", station)
 		s.displayCache.Set(cacheKey, displayData, 2*time.Minute)

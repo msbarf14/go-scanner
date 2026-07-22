@@ -15,22 +15,21 @@ import (
 )
 
 type Config struct {
-	AppEnv                  string
-	HTTPAddr                string
-	PublicBaseURL           *url.URL
-	DatabaseURL             string
-	DBMaxConnections        int32
-	DBMinConnections        int32
-	DBStatementTimeout      time.Duration
-	SessionSecret           []byte
-	SessionIdleTimeout      time.Duration
-	SessionAbsoluteTimeout  time.Duration
-	AllowedScannerRoles     []string
-	AllowedScannerPerms     []string
-	DefaultOperatorID       string
-	AppTimezone             *time.Location
-	LogLevel                slog.Level
-	TrustedProxyCIDRs       []*net.IPNet
+	AppEnv                 string
+	HTTPAddr               string
+	PublicBaseURL          *url.URL
+	DatabaseURL            string
+	DBMaxConnections       int32
+	DBMinConnections       int32
+	DBStatementTimeout     time.Duration
+	SessionSecret          []byte
+	SessionIdleTimeout     time.Duration
+	SessionAbsoluteTimeout time.Duration
+	AllowedScannerRoles    []string
+	AllowedScannerPerms    []string
+	AppTimezone            *time.Location
+	LogLevel               slog.Level
+	TrustedProxyCIDRs      []*net.IPNet
 }
 
 func Load() (Config, error) {
@@ -97,11 +96,6 @@ func Load() (Config, error) {
 		return cfg, errors.New("ALLOWED_SCANNER_ROLES must not be empty")
 	}
 	cfg.AllowedScannerPerms = parseCSV(getenv("ALLOWED_SCANNER_PERMISSIONS", "scanner.access"))
-
-	cfg.DefaultOperatorID = strings.TrimSpace(os.Getenv("DEFAULT_OPERATOR_ID"))
-	if cfg.DefaultOperatorID == "" {
-		return cfg, errors.New("DEFAULT_OPERATOR_ID is required")
-	}
 
 	cfg.AppTimezone, err = time.LoadLocation(getenv("APP_TIMEZONE", "Asia/Makassar"))
 	if err != nil {

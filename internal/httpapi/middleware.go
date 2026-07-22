@@ -87,13 +87,20 @@ func LogRequests(logger *slog.Logger) func(http.Handler) http.Handler {
 			logger.InfoContext(r.Context(), "http request",
 				"request_id", RequestIDFromContext(r.Context()),
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", redactedLogPath(r.URL.Path),
 				"status", status,
 				"bytes", sw.bytes,
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
 		})
 	}
+}
+
+func redactedLogPath(path string) string {
+	if strings.HasPrefix(path, "/api/orders/") && strings.HasSuffix(path, "/pickup") {
+		return "/api/orders/:order_ulid/pickup"
+	}
+	return path
 }
 
 func SecurityHeaders(next http.Handler) http.Handler {

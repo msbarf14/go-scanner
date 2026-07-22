@@ -78,7 +78,7 @@ async function fetchDisplayData() {
     const data: DisplayResponse = await res.json();
     const newData = data.data.display;
 
-    if (newData && (!currentData || newData.order.id !== currentData.order.id)) {
+    if (newData && (!currentData || newData.order.id !== currentData.order.id || newData.scanned_at !== currentData.scanned_at)) {
       currentData = newData;
       show = false;
       render();

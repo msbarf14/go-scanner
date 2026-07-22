@@ -1,4 +1,4 @@
-import"./modulepreload-polyfill-B5Qt9EMX.js";const f="",y="https://r2.fenturun2026.com/assets".replace(/\/$/,""),b="11";let o=1,e=null,r=!1;const $=document.getElementById("app");function t(a){return`${`${y}/${a.replace(/^\/+/,"")}`}?v=${encodeURIComponent(b)}`}function s(a){return String(a??"").replace(/[&<>'"]/g,n=>{switch(n){case"&":return"&amp;";case"<":return"&lt;";case">":return"&gt;";case"'":return"&#39;";case'"':return"&quot;";default:return n}})}function w(){const a=new URLSearchParams(window.location.search);o=parseInt(a.get("station")||"1",10),l(),u(),setInterval(u,500)}async function u(){try{const a=await fetch(`${f}/api/display?station=${o}`);if(!a.ok)return;const i=(await a.json()).data.display;i&&(!e||i.order.id!==e.order.id)?(e=i,r=!1,l(),setTimeout(()=>{r=!0,l()},50)):!i&&e&&(e=null,r=!1,l())}catch{}}function l(){var c,d,p,v;const a=((c=e==null?void 0:e.ticket)==null?void 0:c.category)||"-",n=((d=e==null?void 0:e.participant)==null?void 0:d.name)||"-",i=((p=e==null?void 0:e.participant)==null?void 0:p.bib_name)||"",m=((v=e==null?void 0:e.participant)==null?void 0:v.bib_number)||"—",h=i||n,g=!!(i&&i!==n);$.innerHTML=`
+import"./modulepreload-polyfill-B5Qt9EMX.js";const f="",y="https://r2.fenturun2026.com/assets".replace(/\/$/,""),b="11";let o=1,e=null,r=!1;const $=document.getElementById("app");function t(a){return`${`${y}/${a.replace(/^\/+/,"")}`}?v=${encodeURIComponent(b)}`}function s(a){return String(a??"").replace(/[&<>'"]/g,i=>{switch(i){case"&":return"&amp;";case"<":return"&lt;";case">":return"&gt;";case"'":return"&#39;";case'"':return"&quot;";default:return i}})}function w(){const a=new URLSearchParams(window.location.search);o=parseInt(a.get("station")||"1",10),l(),u(),setInterval(u,500)}async function u(){try{const a=await fetch(`${f}/api/display?station=${o}`);if(!a.ok)return;const n=(await a.json()).data.display;n&&(!e||n.order.id!==e.order.id||n.scanned_at!==e.scanned_at)?(e=n,r=!1,l(),setTimeout(()=>{r=!0,l()},50)):!n&&e&&(e=null,r=!1,l())}catch{}}function l(){var c,d,p,v;const a=((c=e==null?void 0:e.ticket)==null?void 0:c.category)||"-",i=((d=e==null?void 0:e.participant)==null?void 0:d.name)||"-",n=((p=e==null?void 0:e.participant)==null?void 0:p.bib_name)||"",m=((v=e==null?void 0:e.participant)==null?void 0:v.bib_number)||"—",h=n||i,g=!!(n&&n!==i);$.innerHTML=`
     <div class="display-container">
       <div class="display-bg" aria-hidden="true">
         <img src="${t("img/2026-runner-display.jpg")}" alt="" />
@@ -32,7 +32,7 @@ import"./modulepreload-polyfill-B5Qt9EMX.js";const f="",y="https://r2.fenturun20
 
                   <div class="runner-name-block">
                     <h2 class="runner-bib-name">BIB: ${s(h)}</h2>
-                    ${g?`<p class="runner-legal-name">${s(n)}</p>`:""}
+                    ${g?`<p class="runner-legal-name">${s(i)}</p>`:""}
                   </div>
                 </div>
               </div>

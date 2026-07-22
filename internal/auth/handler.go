@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/csrf"
@@ -16,12 +18,13 @@ type contextKey string
 const sessionContextKey contextKey = "session"
 
 type Handler struct {
-	service  *Service
-	sessions *SessionManager
+	service           *Service
+	sessions          *SessionManager
+	trustedProxyCIDRs []*net.IPNet
 }
 
-func NewHandler(service *Service, sessions *SessionManager) *Handler {
-	return &Handler{service: service, sessions: sessions}
+func NewHandler(service *Service, sessions *SessionManager, trustedProxyCIDRs []*net.IPNet) *Handler {
+	return &Handler{service: service, sessions: sessions, trustedProxyCIDRs: trustedProxyCIDRs}
 }
 
 type loginRequest struct {
@@ -44,7 +47,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, ok, err := h.service.Login(r.Context(), req.Identity, req.Password)
+	user, ok, err := h.service.Login(r.Context(), req.Identity, req.Password, h.clientIP(r))
 	if err != nil {
 		respond.JSON(w, r, http.StatusServiceUnavailable, "database_unavailable", "Service belum siap", nil)
 		return
@@ -116,6 +119,50 @@ func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), sessionContextKey, session)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (h *Handler) clientIP(r *http.Request) string {
+	remoteIP := parseRemoteIP(r.RemoteAddr)
+	if remoteIP == nil {
+		return ""
+	}
+
+	if h.isTrustedProxy(remoteIP) {
+		if forwardedIP := parseForwardedIP(r.Header.Get("X-Forwarded-For")); forwardedIP != nil {
+			return forwardedIP.String()
+		}
+		if realIP := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); realIP != nil {
+			return realIP.String()
+		}
+	}
+
+	return remoteIP.String()
+}
+
+func (h *Handler) isTrustedProxy(ip net.IP) bool {
+	for _, cidr := range h.trustedProxyCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseRemoteIP(remoteAddr string) net.IP {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	return net.ParseIP(strings.TrimSpace(host))
+}
+
+func parseForwardedIP(header string) net.IP {
+	for _, part := range strings.Split(header, ",") {
+		if ip := net.ParseIP(strings.TrimSpace(part)); ip != nil {
+			return ip
+		}
+	}
+	return nil
 }
 
 func SessionFromContext(ctx context.Context) (Session, bool) {

@@ -12,10 +12,14 @@ import (
 	"github.com/gorilla/securecookie"
 )
 
-const CookieName = "__Host-fenturun_scanner_session"
+const (
+	SecureCookieName = "__Host-fenturun_scanner_session"
+	LocalCookieName  = "fenturun_scanner_session"
+)
 
 type SessionManager struct {
 	codec           *securecookie.SecureCookie
+	cookieName      string
 	secure          bool
 	idleTimeout     time.Duration
 	absoluteTimeout time.Duration
@@ -28,8 +32,14 @@ func NewSessionManager(secret []byte, secure bool, idleTimeout time.Duration, ab
 	codec.SetSerializer(securecookie.JSONEncoder{})
 	codec.MaxAge(int(absoluteTimeout.Seconds()))
 
+	cookieName := LocalCookieName
+	if secure {
+		cookieName = SecureCookieName
+	}
+
 	return &SessionManager{
 		codec:           codec,
+		cookieName:      cookieName,
 		secure:          secure,
 		idleTimeout:     idleTimeout,
 		absoluteTimeout: absoluteTimeout,
@@ -47,12 +57,12 @@ func (m *SessionManager) New(userID string, now time.Time) Session {
 }
 
 func (m *SessionManager) Read(r *http.Request, now time.Time) (Session, bool) {
-	cookie, err := r.Cookie(CookieName)
+	cookie, err := r.Cookie(m.cookieName)
 	if err != nil {
 		return Session{}, false
 	}
 	var session Session
-	if err := m.codec.Decode(CookieName, cookie.Value, &session); err != nil {
+	if err := m.codec.Decode(m.cookieName, cookie.Value, &session); err != nil {
 		return Session{}, false
 	}
 	if err := m.validate(session, now.UTC()); err != nil {
@@ -62,12 +72,12 @@ func (m *SessionManager) Read(r *http.Request, now time.Time) (Session, bool) {
 }
 
 func (m *SessionManager) Write(w http.ResponseWriter, session Session) error {
-	encoded, err := m.codec.Encode(CookieName, session)
+	encoded, err := m.codec.Encode(m.cookieName, session)
 	if err != nil {
 		return err
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     m.cookieName,
 		Value:    encoded,
 		Path:     "/",
 		Secure:   m.secure,
@@ -80,7 +90,7 @@ func (m *SessionManager) Write(w http.ResponseWriter, session Session) error {
 
 func (m *SessionManager) Clear(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     CookieName,
+		Name:     m.cookieName,
 		Value:    "",
 		Path:     "/",
 		Secure:   m.secure,

@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': backendUrl,
+        '/auth': backendUrl,
         '/healthz': backendUrl,
         '/readyz': backendUrl,
       },

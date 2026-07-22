@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -11,28 +12,40 @@ import (
 
 const dummyHash = "$2y$12$BthihhEwJ.8OVJidzVoCMugOj4P.E7DNEGfBcb9dpmDObkQmPk/TS"
 
+const (
+	loginLimiterEvery      = 200 * time.Millisecond
+	loginLimiterBurst      = 5
+	loginLimiterTTL        = 15 * time.Minute
+	loginLimiterMaxEntries = 2048
+)
+
+type loginLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
 type Service struct {
-	repo        *Repository
-	roles       []string
-	permissions []string
-	limiter     *rate.Limiter
+	repo          *Repository
+	roles         []string
+	permissions   []string
+	limitersMu    sync.Mutex
+	loginLimiters map[string]*loginLimiterEntry
 }
 
 func NewService(repo *Repository, roles []string, permissions []string) *Service {
 	return &Service{
-		repo:        repo,
-		roles:       roles,
-		permissions: permissions,
-		limiter:     rate.NewLimiter(rate.Every(200*time.Millisecond), 5),
+		repo:          repo,
+		roles:         roles,
+		permissions:   permissions,
+		loginLimiters: make(map[string]*loginLimiterEntry),
 	}
 }
 
-func (s *Service) Login(ctx context.Context, identity string, password string) (User, bool, error) {
-	if !s.limiter.Allow() {
+func (s *Service) Login(ctx context.Context, identity string, password string, clientIP string) (User, bool, error) {
+	identity = strings.TrimSpace(identity)
+	if !s.allowLoginAttempt(identity, clientIP, time.Now()) {
 		return User{}, false, nil
 	}
-
-	identity = strings.TrimSpace(identity)
 	if identity == "" || len(identity) > 255 || password == "" || len(password) > 1024 {
 		compare(dummyHash, password)
 		return User{}, false, nil
@@ -64,6 +77,54 @@ func (s *Service) Login(ctx context.Context, identity string, password string) (
 
 func (s *Service) IsAuthorized(ctx context.Context, userID string) (bool, error) {
 	return s.repo.IsAuthorized(ctx, userID, s.roles, s.permissions)
+}
+
+func (s *Service) allowLoginAttempt(identity string, clientIP string, now time.Time) bool {
+	key := loginLimiterKey(identity, clientIP)
+
+	s.limitersMu.Lock()
+	defer s.limitersMu.Unlock()
+
+	if len(s.loginLimiters) >= loginLimiterMaxEntries {
+		s.cleanupLoginLimiters(now)
+	}
+
+	entry, ok := s.loginLimiters[key]
+	if !ok {
+		if len(s.loginLimiters) >= loginLimiterMaxEntries {
+			return false
+		}
+		entry = &loginLimiterEntry{limiter: rate.NewLimiter(rate.Every(loginLimiterEvery), loginLimiterBurst)}
+		s.loginLimiters[key] = entry
+	}
+
+	entry.lastSeen = now
+	return entry.limiter.AllowN(now, 1)
+}
+
+func (s *Service) cleanupLoginLimiters(now time.Time) {
+	for key, entry := range s.loginLimiters {
+		if now.Sub(entry.lastSeen) > loginLimiterTTL {
+			delete(s.loginLimiters, key)
+		}
+	}
+}
+
+func loginLimiterKey(identity string, clientIP string) string {
+	identity = strings.ToLower(strings.TrimSpace(identity))
+	if len(identity) > 255 {
+		identity = identity[:255]
+	}
+	if identity == "" {
+		identity = "-"
+	}
+
+	clientIP = strings.TrimSpace(clientIP)
+	if clientIP == "" {
+		clientIP = "-"
+	}
+
+	return identity + "|" + clientIP
 }
 
 func compare(hash string, password string) bool {

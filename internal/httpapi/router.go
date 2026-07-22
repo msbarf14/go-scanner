@@ -6,6 +6,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gorilla/csrf"
+
+	"fenturun2026-bib-scanner/internal/auth"
 	"fenturun2026-bib-scanner/internal/scanner"
 	"fenturun2026-bib-scanner/internal/store"
 	"fenturun2026-bib-scanner/internal/web"
@@ -14,8 +17,10 @@ import (
 type Deps struct {
 	Store      *store.Store
 	Logger     *slog.Logger
+	Auth       *auth.Handler
 	Scanner    *scanner.Handler
 	BaseURL    *url.URL
+	CSRFSecret []byte
 	Production bool
 }
 
@@ -36,7 +41,39 @@ func NewRouter(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/display", deps.Scanner.Display)
 	mux.HandleFunc("POST /api/scans/validate", deps.Scanner.Validate)
-	mux.HandleFunc("POST /api/orders/{order_ulid}/pickup", deps.Scanner.Pickup)
+	mux.Handle("GET /auth/session", http.HandlerFunc(deps.Auth.Session))
+
+	protectedMux := http.NewServeMux()
+	protectedMux.HandleFunc("GET /auth/csrf", deps.Auth.CSRFToken)
+	protectedMux.HandleFunc("POST /auth/login", deps.Auth.Login)
+	protectedMux.HandleFunc("POST /auth/logout", deps.Auth.Logout)
+	protectedMux.Handle("POST /api/orders/{order_ulid}/pickup", deps.Auth.RequireAuth(http.HandlerFunc(deps.Scanner.Pickup)))
+
+	trustedOrigins := []string{}
+	if !deps.Production {
+		trustedOrigins = append(trustedOrigins, "localhost:5173", "127.0.0.1:5173")
+	}
+	csrfMiddleware := csrf.Protect(
+		deps.CSRFSecret,
+		csrf.Secure(deps.BaseURL.Scheme == "https"),
+		csrf.SameSite(csrf.SameSiteStrictMode),
+		csrf.Path("/"),
+		csrf.RequestHeader("X-CSRF-Token"),
+		csrf.TrustedOrigins(trustedOrigins),
+		csrf.ErrorHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			WriteJSON(w, r, http.StatusForbidden, "forbidden", "CSRF token tidak valid", nil)
+		})),
+	)
+	baseCSRFProtected := csrfMiddleware(protectedMux)
+	var csrfProtected http.Handler = baseCSRFProtected
+	if deps.BaseURL.Scheme != "https" {
+		csrfProtected = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			baseCSRFProtected.ServeHTTP(w, csrf.PlaintextHTTPRequest(r))
+		})
+	}
+
+	mux.Handle("/auth/", csrfProtected)
+	mux.Handle("POST /api/orders/{order_ulid}/pickup", csrfProtected)
 
 	displayHandler := web.DisplayHandler()
 	scannerHandler := web.ScannerHandler()
@@ -67,12 +104,18 @@ func NewRouter(deps Deps) http.Handler {
 		displayHandler.ServeHTTP(w, r)
 	})
 
+	extraOrigins := []string{}
+	if !deps.Production {
+		extraOrigins = append(extraOrigins, "http://localhost:5173", "http://127.0.0.1:5173")
+	}
+
 	return Chain(mux,
 		Recover(deps.Logger),
 		RequestID,
 		LogRequests(deps.Logger),
 		SecurityHeaders,
 		NoStoreAPI,
+		SameOrigin(deps.BaseURL, extraOrigins...),
 		LimitBody(1<<20),
 		RequireJSON,
 	)
