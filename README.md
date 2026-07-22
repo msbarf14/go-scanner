@@ -2,7 +2,7 @@
 
 Aplikasi web responsif berbasis Go untuk memvalidasi tiket peserta Fenturun 2026 dan mencatat penyerahan race pack. Terdiri dari dua halaman: **Runner Display** (untuk TV/monitor) dan **Runner Scanner** (untuk operator).
 
-> Status: baseline implementasi MVP. Spesifikasi lengkap tersedia di [`docs/prd.md`](docs/prd.md).
+> Status: scanner event-ready dengan Display Only publik, Race Pack terproteksi login Laravel, kamera/USB/manual input, dan hardening produksi P2. Spesifikasi lengkap tersedia di [`docs/prd.md`](docs/prd.md).
 
 ## Tujuan
 
@@ -23,23 +23,23 @@ Aplikasi web responsif berbasis Go untuk memvalidasi tiket peserta Fenturun 2026
 - Station parameter via URL (`?station=1`).
 
 ### Runner Scanner (`/runner-scanner`)
-- **Tanpa login** — menggunakan operator default dari konfigurasi.
-- Input QR via barcode scanner USB (keyboard wedge) dengan auto-focus.
-- Input payload tiket secara manual.
-- Mode **Display Only** — scan untuk menampilkan info peserta.
-- Mode **Race Pack** — scan dengan verifikasi penyerahan race pack.
-- Riwayat scan sementara dalam session browser (max 20 item).
-- Feedback visual dan suara (beep success/error).
-- Station parameter via URL (`?station=1`).
+- Mode **Display Only** terbuka tanpa login untuk menampilkan info peserta ke Runner Display.
+- Toggle **Race Pack** membuka modal login operator memakai akun Laravel.
+- Pickup hanya bisa dilakukan saat session scanner aktif dan operator punya role/permission yang diizinkan.
+- Input QR via kamera lokal browser, barcode scanner USB/Bluetooth keyboard wedge, atau input manual.
+- Kamera memproses QR lokal di browser; video/frame tidak dikirim ke backend.
+- Riwayat scan lokal sementara dalam `sessionStorage` browser (max 20 item), bukan audit resmi.
+- Feedback visual, suara, dan status koneksi/readiness dinamis.
+- Station parameter via URL (`?station=1`), dinormalisasi ke rentang operasional yang valid.
 
 ### Backend
 - Dukungan full ticket URL, relative ticket path, dan raw order ULID.
 - Validasi order, status pembayaran, soft delete, dan jumlah participant.
 - Konfirmasi penyerahan race pack secara atomik (conditional update).
 - Deteksi race pack yang sudah pernah diambil.
-- In-memory cache untuk data display.
+- In-memory cache berbatas untuk data display per station.
 - Endpoint health dan readiness.
-- Structured logging untuk operasional production.
+- Structured logging non-PII untuk validate/pickup dan operasional production.
 
 ## Aturan Bisnis Utama
 
@@ -155,8 +155,12 @@ Endpoint yang tersedia:
 
 ```text
 GET  /api/display               — Data display untuk station
-POST /api/scans/validate        — Validasi QR/tiket
-POST /api/orders/{ulid}/pickup  — Konfirmasi race pack pickup
+POST /api/scans/validate        — Validasi QR/tiket untuk Display Only atau modal Race Pack
+GET  /auth/session              — Status session scanner
+GET  /auth/csrf                 — Token CSRF untuk mutasi session/pickup
+POST /auth/login                — Login operator Laravel untuk Race Pack
+POST /auth/logout               — Logout session scanner
+POST /api/orders/{ulid}/pickup  — Konfirmasi race pack pickup, wajib session + CSRF
 GET  /healthz                   — Health check
 GET  /readyz                    — Database readiness check
 ```
@@ -267,14 +271,22 @@ DB_MAX_CONNECTIONS=10
 DB_MIN_CONNECTIONS=1
 DB_STATEMENT_TIMEOUT=3s
 
-# Operator Default (ULID user dari database)
-DEFAULT_OPERATOR_ID=01JXXXXXXXXXXXXXXXXXXXXXXX
+# Session dan CSRF. Production wajib eksplisit; generate masing-masing dengan: openssl rand -base64 32
+SESSION_SECRET=change-me-to-at-least-32-bytes-session-secret
+CSRF_SECRET=change-me-to-at-least-32-bytes-csrf-secret
+SESSION_IDLE_TIMEOUT=30m
+SESSION_ABSOLUTE_TIMEOUT=8h
+
+# Auth Laravel/Spatie
+ALLOWED_SCANNER_ROLES=admin,super_admin
+ALLOWED_SCANNER_PERMISSIONS=scanner.access
 
 # Timezone tampilan
 APP_TIMEZONE=Asia/Makassar
 
-# Logging
+# Logging dan proxy
 LOG_LEVEL=info
+TRUSTED_PROXY_CIDRS=
 ```
 
 Atau gunakan `DATABASE_URL` format:
@@ -374,8 +386,10 @@ go vet ./...
 - Tidak ada konfirmasi pickup.
 
 ### Mode Race Pack
+- Toggle Race Pack → modal login operator Laravel bila session scanner belum aktif.
 - Scan QR → tampilkan info peserta + modal verifikasi.
-- Konfirmasi → update database (race_pack_picked_up_at/by).
+- Konfirmasi → update database (`race_pack_picked_up_at/by`) memakai operator dari session, bukan input browser.
+- Modal verifikasi mengunci input scan dan tombol konfirmasi single-flight agar pickup tidak terkirim ganda.
 
 ## Persyaratan Browser
 
@@ -431,7 +445,7 @@ internal/store/           — pgx pool dan klasifikasi DB error
 internal/httpapi/         — router, middleware, response envelope
 internal/scanner/         — QR parser, validation, pickup, outcomes
 internal/scanner/sql/     — SQL queries (lookup, pickup, diagnose)
-internal/webui/           — Embedded frontend assets
+internal/web/             — Embedded frontend assets
 web/src/                  — TypeScript dan CSS
 web/public/               — Manifest, icon, service worker
 test/integration/         — Fixture dan PostgreSQL integration tests
@@ -449,7 +463,7 @@ docs/                     — PRD, plan, schema contract
 
 MVP tidak mencakup:
 
-- Login dan autentikasi user.
+- Login penuh terpisah yang memblokir halaman Display Only.
 - Mode offline atau sinkronisasi pickup.
 - Migration dan tabel scanner baru.
 - Audit permanen setiap scan di PostgreSQL.

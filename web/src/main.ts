@@ -2,6 +2,8 @@ import './styles.css';
 import { BrowserCodeReader, BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
 
 const API_BASE = '';
+const HISTORY_STORAGE_KEY_PREFIX = 'fenturun_scanner_history';
+const HISTORY_LIMIT = 20;
 
 type AuthStatus = 'unknown' | 'anonymous' | 'authenticated';
 type ConnectionStatus = 'checking' | 'ready' | 'offline' | 'database_not_ready';
@@ -101,9 +103,11 @@ function init() {
   const parsedStation = parseInt(params.get('station') || '1', 10);
   station = Number.isFinite(parsedStation) ? parsedStation : 1;
 
+  scanHistory = loadHistory();
   audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
   qrReader = new BrowserQRCodeReader();
 
+  registerServiceWorker();
   render();
   void refreshSession();
   void checkReadiness();
@@ -198,7 +202,10 @@ function render() {
 
         <div id="historyCard" class="history-card">
           <div class="history-header">
-            <h2 class="history-title">Riwayat Scan</h2>
+            <div>
+              <h2 class="history-title">Riwayat Scan</h2>
+              <p class="history-note">Riwayat lokal sementara, bukan audit resmi.</p>
+            </div>
             <span id="historyCount" class="history-count">${scanHistory.length} scan</span>
           </div>
           <div id="historyContent">
@@ -273,6 +280,45 @@ async function checkReadiness() {
   } catch {
     setConnectionStatus('offline');
   }
+}
+
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      void navigator.serviceWorker.register('/service-worker.js');
+    });
+  }
+}
+
+function historyStorageKey(): string {
+  return `${HISTORY_STORAGE_KEY_PREFIX}_${station}`;
+}
+
+function loadHistory(): HistoryItem[] {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(historyStorageKey()) || '[]');
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.slice(0, HISTORY_LIMIT).filter((item): item is HistoryItem => (
+      typeof item?.time === 'string' &&
+      typeof item?.orderNumber === 'string' &&
+      typeof item?.category === 'string' &&
+      typeof item?.bib === 'string' &&
+      typeof item?.name === 'string' &&
+      typeof item?.racePack === 'boolean'
+    ));
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory() {
+  sessionStorage.setItem(historyStorageKey(), JSON.stringify(scanHistory.slice(0, HISTORY_LIMIT)));
+}
+
+function clearHistory() {
+  scanHistory = [];
+  sessionStorage.removeItem(historyStorageKey());
 }
 
 function renderHistoryContent(): string {
@@ -647,6 +693,7 @@ async function logout() {
     authStatus = 'anonymous';
     csrfToken = null;
     racePackMode = false;
+    clearHistory();
     render();
 
     if (serverLogoutSucceeded) {
@@ -876,6 +923,7 @@ async function confirmPickup(orderId: string, validatedData: ScanResult) {
       authStatus = 'anonymous';
       csrfToken = null;
       racePackMode = false;
+      clearHistory();
       clearVerification();
       render();
       showResult('error', 'Session Race Pack berakhir. Login ulang lalu scan kembali.');
@@ -956,7 +1004,8 @@ function addToHistory(orderNumber: string, category: string, bib: string, name: 
   });
 
   scanHistory.unshift({ time, orderNumber, category, bib, name, racePack });
-  if (scanHistory.length > 20) scanHistory.length = 20;
+  if (scanHistory.length > HISTORY_LIMIT) scanHistory.length = HISTORY_LIMIT;
+  saveHistory();
 
   const historyCount = document.getElementById('historyCount');
   const historyContent = document.getElementById('historyContent');

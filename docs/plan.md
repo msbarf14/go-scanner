@@ -1,6 +1,6 @@
 # Context
 
-Fenturun 2026 membutuhkan scanner race pack terpisah yang lebih ringan dan nyaman di smartphone daripada scanner Filament/Livewire existing. Repository scanner saat ini baru berisi `README.md` dan `docs/prd.md`; belum ada source code, Go module, frontend, test, atau deployment artifact.
+Fenturun 2026 membutuhkan scanner race pack terpisah yang lebih ringan dan nyaman di smartphone daripada scanner Filament/Livewire existing. Repository scanner saat ini sudah berisi service Go, frontend Vite/TypeScript, embedded assets, test, dan deployment Docker baseline; dokumen ini menjadi rujukan fase teknis dan gap yang belum diverifikasi penuh.
 
 Aplikasi Go akan membaca user, role/permission, order, participant, dan ticket langsung dari PostgreSQL existing Laravel, lalu hanya memperbarui `orders.race_pack_picked_up_at`, `orders.race_pack_picked_up_by`, dan `orders.updated_at`. Target akhirnya adalah scanner online-only yang aman terhadap double pickup, meminimalkan PII, dapat digunakan beberapa perangkat sekaligus, dan telah diverifikasi pada Chrome Android serta Safari iOS.
 
@@ -44,7 +44,7 @@ internal/httpapi/            router, middleware, response envelope
 internal/auth/               login, role/permission, session, CSRF
 internal/scanner/            QR parser, validation, pickup, outcomes
 internal/scanner/sql/        lookup, conditional update, diagnosis
-internal/webui/              embedded frontend assets
+internal/web/                embedded frontend assets
 web/src/                     TypeScript dan CSS
 web/public/                  manifest, icon, service worker
 test/integration/            fixture dan PostgreSQL integration tests
@@ -177,7 +177,7 @@ File representatif:
 - `web/src/styles.css`
 - `web/public/manifest.webmanifest`
 - `web/public/service-worker.js`
-- `internal/webui/assets.go`
+- `internal/web/dist`
 
 Pekerjaan:
 

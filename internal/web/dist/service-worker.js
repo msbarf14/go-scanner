@@ -1,8 +1,10 @@
-const CACHE_NAME = 'fenturun-scanner-v1';
+const CACHE_NAME = 'fenturun-scanner-v2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
+  '/runner-scanner',
+  '/runner-scanner.html',
   '/manifest.webmanifest',
+  '/icon-192.png',
+  '/icon-512.png',
 ];
 
 self.addEventListener('install', (event) => {

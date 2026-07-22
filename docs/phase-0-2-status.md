@@ -1,53 +1,63 @@
-# Status Implementasi Fase 0–2
+# Status Implementasi P0–P3
 
 ## Selesai di repository
 
-### Fase 0 — Kontrak Schema dan Baseline Test
+### Baseline dan Fondasi
 
-- `docs/schema-contract.md` mendokumentasikan kontrak tabel, kolom, relasi, outcome API, dan query pickup konseptual.
-- `docs/traceability.md` membuat traceability matrix awal dari PRD ke fase implementasi dan bukti verifikasi target.
-- `test/integration/schema.sql` menyediakan schema fixture PostgreSQL minimal untuk tabel scanner-relevant.
-- `test/integration/fixtures.sql` menyediakan data dasar untuk user admin/customer/scanner permission, roles, permissions, tickets, orders, dan participants.
-- `docs/prd.md` sudah dikoreksi agar grant `tickets` tidak lagi merujuk `tickets.ukuran_jersey`.
+- Service Go menyediakan entrypoint, konfigurasi environment, koneksi PostgreSQL `pgxpool`, timeout HTTP, graceful shutdown, structured logging, `/healthz`, dan `/readyz`.
+- Frontend Vite/TypeScript dibangun ke `internal/web/dist` dan disajikan oleh binary Go.
+- Parser QR menerima full ticket URL, relative ticket path, dan raw ULID tanpa membuka URL dari QR.
+- Validasi order memeriksa paid, soft delete, participant cardinality tepat satu, dan pickup status.
+- Pickup menggunakan conditional update atomik dan waktu database.
 
-### Fase 1 — Fondasi Service Go
+### Auth Scanner
 
-- `go.mod` dibuat dengan dependency utama: `pgx`, `gorilla/securecookie`, `gorilla/csrf`, `x/crypto`, dan `x/time`.
-- `cmd/scanner/main.go` menyediakan entrypoint, logger, PostgreSQL store, router, HTTP server timeout, dan graceful shutdown.
-- `internal/config/config.go` memuat environment loader dan validasi konfigurasi.
-- `internal/store/postgres.go` memuat setup `pgxpool`, statement timeout, timezone, readiness, dan close.
-- `internal/httpapi` memuat response envelope, middleware request ID, logging, recovery, security headers, no-store, body limit, JSON requirement, same-origin check, router, `/healthz`, dan `/readyz`.
-- `.env.example`, `.gitignore`, dan `Makefile` dasar sudah dibuat.
+- `/runner-scanner` tetap terbuka tanpa login dalam mode Display Only.
+- Toggle Race Pack membuka modal login jika session scanner belum aktif.
+- Login memakai user Laravel dari PostgreSQL, password bcrypt, serta role/permission Spatie guard `web`.
+- Session scanner disimpan dalam cookie Go terpisah dari session Laravel, dengan idle dan absolute timeout.
+- Pickup dilindungi auth session, CSRF, dan same-origin check; operator ID berasal dari session.
+- Logout mematikan mode Race Pack lokal dan hanya menampilkan sukses bila server logout berhasil.
 
-### Fase 2 — Authentication, Authorization, dan Session
+### P0/P1 Event Ready
 
-- `internal/auth/repository.go` memuat repository user lookup dan authorization Spatie.
-- `internal/auth/sql/find_user.sql` dan `internal/auth/sql/is_authorized.sql` menjadi sumber query auth.
-- `internal/auth/session.go` memuat cookie session stateless terenkripsi/ditandatangani dengan idle dan absolute timeout.
-- `internal/auth/service.go` memuat login flow, bcrypt verification, dummy hash, role/permission check, dan rate limit awal.
-- `internal/auth/handler.go` memuat `POST /auth/login`, `POST /auth/logout`, `GET /auth/session`, dan protected-route middleware.
-- Router memasang CSRF protection dan same-origin check untuk mutasi.
-- `internal/auth/session_test.go` menyediakan test dasar round-trip dan idle expiry session.
+- Modal verifikasi mengunci input scanner, kamera, toggle, dan logout selama verifikasi.
+- Double-click confirm hanya mengirim satu request pickup.
+- Semua input kamera, USB keyboard wedge, dan manual masuk ke satu jalur submit/validate.
+- Kamera QR memakai decoder lokal browser dan fallback USB/manual tetap tersedia saat permission denied atau kamera gagal.
+- Status UI tidak lagi `Ready` statis; readiness/API/offline/processing/verification pending ditampilkan dinamis.
+- Rate limiter login scoped per identity + client IP dan bounded.
+- Trusted proxy forwarding hanya dipakai dari CIDR yang dikonfigurasi.
+- Log validate/pickup mencatat outcome/duration/request ID dengan order/operator ID dimasking; raw QR, nama, email, password, dan payload tiket penuh tidak dicatat.
+- Access log pickup meredaksi ULID path.
 
-## Belum diverifikasi otomatis
+### P2 Hardening Produksi
 
-Go belum tersedia di PATH pada environment saat ini, sehingga perintah berikut belum bisa dijalankan:
+- `SESSION_SECRET` dan `CSRF_SECRET` dipisah; production wajib mengatur keduanya secara eksplisit.
+- Session ID fail closed bila random source gagal.
+- Production wajib memilih `DB_SSLMODE` eksplisit atau menyertakan `sslmode` pada `DATABASE_URL`.
+- Station validate/display dinormalisasi dan dibatasi ke rentang valid.
+- Display cache dibatasi jumlah entry agar endpoint publik tidak membuat key tak terbatas.
+- Diagnosis pickup mengembalikan soft-deleted order sebagai `not_found` sebelum status non-paid.
+
+### P3 Produk dan Release Hygiene
+
+- Manifest PWA diarahkan ke `/runner-scanner`.
+- Service worker mendaftarkan shell/static scanner dan membuat `/api`, `/auth`, `/healthz`, serta `/readyz` tetap network-only.
+- Riwayat scan disimpan maksimal 20 item di `sessionStorage`, diberi label “riwayat lokal sementara, bukan audit resmi”, dan dihapus saat logout/session expired.
+- Dokumentasi README, PRD, traceability, dan status implementasi disinkronkan dengan Display Only publik, Race Pack login modal, session Go, kamera/USB/manual, hardening secret/DB, dan limitation aktual.
+
+## Verifikasi otomatis terakhir
 
 ```text
-go mod tidy
 go test ./...
 ```
 
-Setelah Go tersedia, jalankan:
+Lulus setelah P2. P3 perlu menjalankan ulang `go test ./...` dan `npm --prefix web run build` karena ada perubahan frontend/dokumentasi.
 
-```text
-make tidy
-make test
-```
+## Belum selesai / butuh environment eksternal
 
-## Catatan teknis berikutnya
-
-- Fase 2 sudah memiliki skeleton fungsional, tetapi masih perlu integration test PostgreSQL untuk login admin/customer/permission dan session lintas request.
-- CSRF token sementara diekspos pada HTML root placeholder; UI Fase 4 perlu mengambil token tersebut atau endpoint token khusus sebelum request mutasi.
-- Rate limiter login saat ini global in-process sebagai baseline; production tetap perlu rate limit di ingress sesuai plan.
-- Scanner backend Fase 3 belum dikerjakan.
+- Device test kamera pada Chrome Android dan Safari iOS melalui HTTPS harus dilakukan pada perangkat fisik acara/staging.
+- PostgreSQL integration test penuh untuk fixture paid/non-paid/soft-delete/participant cardinality/duplicate concurrent belum dijalankan di environment ini.
+- Icon PWA saat ini placeholder; produksi sebaiknya mengganti dengan icon event final.
+- Load test dan fresh container smoke perlu dilakukan sebelum release production.

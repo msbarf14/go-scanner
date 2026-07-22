@@ -9,10 +9,10 @@
 | Aplikasi sumber | `../fenturun2026` |
 | Database | PostgreSQL existing milik aplikasi Laravel |
 | Target perangkat | TV/monitor (Display) dan HP/tablet (Scanner) |
-| Metode input utama | Scanner USB/Bluetooth (keyboard wedge) |
+| Metode input utama | Kamera browser lokal dan scanner USB/Bluetooth keyboard wedge |
 | Metode input cadangan | Input manual |
-| Mode koneksi | Online wajib |
-| Status dokumen | Baseline implementasi MVP |
+| Mode koneksi | Online wajib untuk validasi dan pickup |
+| Status dokumen | Sinkron dengan implementasi scanner event-ready P2/P3 |
 | Tanggal verifikasi data | 20 Juli 2026 |
 
 ## 2. Ringkasan Produk
@@ -24,7 +24,7 @@ Fenturun 2026 BIB & Race Pack Scanner adalah aplikasi berbasis Go untuk memvalid
 
 Service Go terhubung langsung ke database PostgreSQL existing milik aplikasi Laravel Fenturun 2026. Service tidak membuat atau mengelola order, participant, ticket, maupun pembayaran. Service hanya membaca data yang diperlukan untuk validasi dan memperbarui status pengambilan race pack pada order yang valid.
 
-**Tanpa autentikasi** — operator menggunakan `DEFAULT_OPERATOR_ID` dari konfigurasi environment.
+Halaman scanner tetap dapat dibuka tanpa login dalam mode **Display Only**. Mode **Race Pack** wajib login melalui modal memakai akun Laravel; Go memverifikasi password, role/permission, lalu membuat session scanner terpisah.
 
 MVP tidak membutuhkan migration atau tabel baru. Status pengambilan menggunakan kolom existing:
 
@@ -79,7 +79,7 @@ Menyediakan proses scan dan konfirmasi pengambilan race pack yang cepat, sederha
 ### 4.2 Tujuan Operasional
 
 - Sistem dapat menampilkan info peserta pada TV/monitor (Runner Display).
-- Petugas dapat memindai tiket menggunakan barcode scanner USB.
+- Petugas dapat memindai tiket menggunakan kamera browser, barcode scanner USB/Bluetooth, atau input manual.
 - Sistem dapat mengenali QR tiket existing tanpa menerbitkan ulang tiket.
 - Petugas dapat melihat identitas operasional minimum peserta sebelum menyerahkan race pack.
 - Sistem dapat mencatat waktu dan operator pengambilan.
@@ -127,7 +127,7 @@ Hak akses:
 - Mengonfirmasi penyerahan race pack.
 - Melihat hasil scan dalam session perangkat saat ini.
 
-**Tanpa autentikasi** — operator menggunakan `DEFAULT_OPERATOR_ID` dari konfigurasi environment. Semua perangkat yang mengakses halaman scanner dianggap memiliki hak akses.
+Mode Display Only dapat digunakan tanpa autentikasi. Mode Race Pack hanya aktif setelah operator login memakai akun Laravel dan lolos role/permission scanner.
 
 ### 6.2 Supervisor
 
@@ -301,16 +301,16 @@ QR berfungsi sebagai identifier, bukan sebagai autentikasi. Otorisasi tetap bera
 
 ## 10. Alur Pengguna
 
-### 10.1 Login Operator
+### 10.1 Login Operator Race Pack
 
-1. Operator membuka URL scanner melalui HTTPS.
-2. Sistem menampilkan form login.
-3. Operator memasukkan username atau email dan password Laravel.
-4. Go mencari user pada tabel `users` menggunakan parameterized query.
-5. Go memverifikasi password terhadap hash Laravel.
-6. Go memeriksa role atau permission yang diizinkan.
-7. Jika valid, Go membuat session scanner.
-8. Operator diarahkan ke halaman kamera.
+1. Operator membuka `/runner-scanner`; halaman tampil dalam mode Display Only tanpa login.
+2. Operator menyalakan toggle Race Pack.
+3. Jika session scanner belum aktif, sistem membuka modal login.
+4. Operator memasukkan username atau email dan password Laravel.
+5. Go mencari user pada tabel `users` menggunakan parameterized query.
+6. Go memverifikasi password terhadap hash Laravel.
+7. Go memeriksa role atau permission yang diizinkan.
+8. Jika valid, Go membuat session scanner terpisah dari session Laravel dan Race Pack aktif.
 
 ### 10.2 Aktivasi Kamera
 
@@ -365,19 +365,23 @@ QR berfungsi sebagai identifier, bukan sebagai autentikasi. Otorisasi tetap bera
 
 | Kode | Requirement |
 |---|---|
-| AUTH-001 | Sistem menggunakan `DEFAULT_OPERATOR_ID` dari konfigurasi environment. |
-| AUTH-002 | Sistem tidak memerlukan login atau session user. |
-| AUTH-003 | Semua perangkat yang mengakses halaman scanner dianggap memiliki hak akses. |
+| AUTH-001 | Display Only pada `/runner-scanner` dapat digunakan tanpa login. |
+| AUTH-002 | Mode Race Pack wajib login melalui modal memakai username/email dan password Laravel. |
+| AUTH-003 | Go membuat session scanner sendiri yang terpisah dari session Laravel. |
+| AUTH-004 | Pickup hanya menggunakan operator ID dari session scanner. |
+| AUTH-005 | Role/permission scanner diverifikasi melalui tabel Spatie guard `web`. |
+| AUTH-006 | Logout scanner hanya mematikan session scanner dan tidak mengubah session Laravel. |
 
 ### 11.2 Kamera dan Input
 
 | Kode | Requirement |
 |---|---|
-| CAM-001 | Barcode scanner USB (keyboard wedge) menjadi metode input utama. |
-| CAM-002 | Input field harus auto-focus untuk menerima input dari barcode scanner. |
-| CAM-003 | Sistem memproses input teks dari barcode scanner dan mengirim ke server. |
-| CAM-004 | Sistem harus mendukung input manual sebagai fallback. |
-| CAM-005 | Input field harus tetap focus setelah scan berhasil. |
+| CAM-001 | Sistem mendukung kamera browser sebagai input QR lokal. |
+| CAM-002 | Kamera memprioritaskan kamera belakang bila tersedia dan tidak mengirim frame ke backend. |
+| CAM-003 | Scanner USB/Bluetooth keyboard wedge tetap didukung dengan input auto-focus. |
+| CAM-004 | Sistem mendukung input manual sebagai fallback. |
+| CAM-005 | Semua input masuk ke lock validasi yang sama agar request tidak paralel saat proses/modal aktif. |
+| CAM-006 | Permission denied/camera unavailable tidak boleh memblokir USB/manual. |
 
 ### 11.3 Validasi Ticket
 
@@ -413,9 +417,9 @@ QR berfungsi sebagai identifier, bukan sebagai autentikasi. Otorisasi tetap bera
 |---|---|
 | UI-001 | Sistem harus memberikan feedback visual untuk sukses, peringatan, dan error. |
 | UI-002 | Sistem harus memberikan feedback suara yang dapat dinonaktifkan. |
-| UI-003 | Sistem harus menampilkan status koneksi service. |
-| UI-004 | Sistem harus menampilkan riwayat scan terbaru pada session browser. |
-| UI-005 | Riwayat lokal tidak boleh dianggap sebagai audit resmi. |
+| UI-003 | Sistem harus menampilkan status koneksi/readiness: checking, ready, offline, database not ready, processing, dan verification pending. |
+| UI-004 | Sistem harus menyimpan dan menampilkan maksimal 20 riwayat scan terbaru pada `sessionStorage` browser. |
+| UI-005 | Riwayat lokal harus diberi label bukan audit resmi dan dihapus saat logout/session expired. |
 | UI-006 | UI harus kembali siap scan setelah hasil ditutup atau diproses. |
 
 ### 11.6 Operasional
@@ -1000,20 +1004,27 @@ DB_SSLMODE
 DB_MAX_CONNECTIONS
 DB_MIN_CONNECTIONS
 DB_STATEMENT_TIMEOUT
-DEFAULT_OPERATOR_ID
+SESSION_SECRET
+CSRF_SECRET
+SESSION_IDLE_TIMEOUT
+SESSION_ABSOLUTE_TIMEOUT
+ALLOWED_SCANNER_ROLES
+ALLOWED_SCANNER_PERMISSIONS
 APP_TIMEZONE
 LOG_LEVEL
+TRUSTED_PROXY_CIDRS
 ```
 
 ### 23.3 Deployment Checklist
 
 - Domain scanner telah tersedia.
 - Sertifikat HTTPS dipercaya perangkat Android dan iOS.
-- Database role scanner telah dibuat dengan least privilege.
+- Database role scanner telah dibuat dengan least privilege dan hanya grant kolom yang dibutuhkan.
 - PostgreSQL dapat diakses dari host Go.
 - Firewall membatasi akses database.
-- Session secret kuat telah dikonfigurasi.
-- Role operator yang diizinkan telah ditetapkan.
+- Session secret dan CSRF secret kuat telah dikonfigurasi terpisah.
+- `DB_SSLMODE` atau `DATABASE_URL?sslmode=` telah diputuskan eksplisit untuk production.
+- Role/permission operator yang diizinkan telah ditetapkan.
 - Health check terhubung ke monitoring.
 - Log production dikirim ke penyimpanan terpusat.
 - Kamera diuji pada perangkat acara sebenarnya.
@@ -1104,3 +1115,4 @@ Pertanyaan berikut dapat diputuskan saat technical design tanpa mengubah scope u
 5. Domain HTTPS apa yang digunakan untuk scanner?
 6. Apakah deployment menggunakan satu instance Go atau beberapa replica?
 7. Apakah PWA harus memiliki mode fullscreen wajib saat acara?
+8. Apakah icon final event akan menggantikan icon placeholder PWA sebelum production?
