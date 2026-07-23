@@ -355,31 +355,202 @@ html, body {
 .camera-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
-.camera-status {
-  font-size: 0.75rem;
+.camera-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.camera-helper {
+  margin-top: 0.25rem;
   color: #6b7280;
+  font-size: 0.75rem;
 }
 
-.camera-status-active {
-  color: #059669;
-  font-weight: 600;
+.camera-mode-pill {
+  flex-shrink: 0;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.camera-state-active .camera-mode-pill {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.camera-state-recovering .camera-mode-pill {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.camera-state-error .camera-mode-pill {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.camera-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid #111827;
+  background: radial-gradient(circle at center, #1f2937, #030712);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 12px 24px rgba(17,24,39,0.12);
 }
 
 .camera-preview {
-  display: none;
+  display: block;
   width: 100%;
-  max-height: 18rem;
+  height: 100%;
   object-fit: cover;
-  border-radius: 0.5rem;
-  border: 1px solid #d1d5db;
-  background: #111827;
+  opacity: 0;
+  transition: opacity 0.2s;
 }
 
 .camera-preview-active {
-  display: block;
+  opacity: 1;
+}
+
+.camera-viewfinder {
+  position: absolute;
+  inset: 15%;
+  border: 1px solid rgba(255,255,255,0.28);
+  border-radius: 0.875rem;
+  box-shadow: 0 0 0 999px rgba(3,7,18,0.24);
+  pointer-events: none;
+}
+
+.corner {
+  position: absolute;
+  width: 2rem;
+  height: 2rem;
+  border-color: #fc0012;
+}
+
+.corner-tl {
+  top: -2px;
+  left: -2px;
+  border-top: 4px solid;
+  border-left: 4px solid;
+  border-top-left-radius: 0.75rem;
+}
+
+.corner-tr {
+  top: -2px;
+  right: -2px;
+  border-top: 4px solid;
+  border-right: 4px solid;
+  border-top-right-radius: 0.75rem;
+}
+
+.corner-bl {
+  bottom: -2px;
+  left: -2px;
+  border-bottom: 4px solid;
+  border-left: 4px solid;
+  border-bottom-left-radius: 0.75rem;
+}
+
+.corner-br {
+  right: -2px;
+  bottom: -2px;
+  border-right: 4px solid;
+  border-bottom: 4px solid;
+  border-bottom-right-radius: 0.75rem;
+}
+
+.camera-status-card {
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 0.75rem;
+  background: rgba(17,24,39,0.82);
+  color: white;
+  backdrop-filter: blur(10px);
+}
+
+.camera-status {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.camera-status-active {
+  color: #d1fae5;
+}
+
+.camera-status-detail {
+  color: #d1d5db;
+  font-size: 0.75rem;
+  line-height: 1.2rem;
+}
+
+.camera-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.camera-control-button {
+  min-height: 2.5rem;
+  padding: 0.625rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.625rem;
+  background: white;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.camera-control-button-active {
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.camera-control-button:focus-visible,
+.camera-zoom-control input:focus-visible {
+  outline: 2px solid #fc0012;
+  outline-offset: 2px;
+}
+
+.camera-zoom-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.625rem;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.camera-zoom-control input {
+  width: min(12rem, 40vw);
+}
+
+.camera-error-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
 }
 
 /* Result banner */
@@ -775,6 +946,32 @@ html, body {
 
   .main-content {
     padding: 1rem;
+  }
+
+  .camera-panel-header,
+  .camera-controls,
+  .camera-error-actions {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .camera-viewport {
+    aspect-ratio: 3 / 4;
+  }
+
+  .camera-status-card {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+
+  .camera-zoom-control {
+    justify-content: space-between;
+  }
+
+  .camera-zoom-control input {
+    width: 55vw;
   }
 
   .history-table th,

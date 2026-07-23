@@ -1,5 +1,7 @@
 import './styles.css';
-import { BrowserCodeReader, BrowserQRCodeReader, type IScannerControls } from '@zxing/browser';
+import { CameraScannerController } from './scanner/camera';
+import { extractOrderId } from './scanner/parser';
+import type { CameraCapabilities, CameraStatus } from './scanner/types';
 
 const API_BASE = '';
 const HISTORY_STORAGE_KEY_PREFIX = 'fenturun_scanner_history';
@@ -70,16 +72,42 @@ let loginModal: HTMLElement | null = null;
 let activeVerification: VerificationState | null = null;
 let connectionStatus: ConnectionStatus = navigator.onLine ? 'checking' : 'offline';
 let inputMode: InputMode = 'scanner';
-let qrReader: BrowserQRCodeReader | null = null;
-let cameraControls: IScannerControls | null = null;
 let cameraRequested = false;
-let cameraActive = false;
-let cameraStarting = false;
-let cameraStatusMessage = 'Kamera belum aktif. USB/manual tetap bisa digunakan.';
+let cameraStatus: CameraStatus = {
+  state: 'idle',
+  message: 'Kamera belum aktif.',
+  detail: 'USB/manual tetap bisa digunakan.',
+  canRetry: false,
+};
+let cameraCapabilities: CameraCapabilities = {
+  torch: false,
+  torchEnabled: false,
+};
 let lastCameraPayload = '';
 let lastCameraScanAt = 0;
+let cameraPagePaused = false;
 
 const app = document.getElementById('app')!;
+const cameraScanner = new CameraScannerController({
+  onPayload: (payload) => void submitScanPayload(payload),
+  onStatus: (status) => {
+    cameraStatus = status;
+    updateCameraUI();
+  },
+  onCapabilities: (capabilities) => {
+    cameraCapabilities = capabilities;
+    if (inputMode === 'camera') {
+      render();
+    } else {
+      updateCameraUI();
+    }
+  },
+  onFatalError: (message) => {
+    cameraRequested = false;
+    render();
+    showResult('error', message);
+  },
+});
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => {
@@ -107,7 +135,6 @@ function init() {
 
   scanHistory = loadHistory();
   audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-  qrReader = new BrowserQRCodeReader();
 
   registerServiceWorker();
   render();
@@ -120,13 +147,14 @@ function init() {
     void checkReadiness();
   });
   window.addEventListener('offline', () => setConnectionStatus('offline'));
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('pagehide', handlePageHide);
+  window.addEventListener('pageshow', handlePageShow);
   setInterval(() => void checkReadiness(), 7000);
   setTimeout(() => focusInput(), 100);
 }
 
 function render() {
-  if (cameraControls) stopCameraStream('Kamera siap dilanjutkan.');
-
   app.innerHTML = `
     <div class="min-h-screen bg-gray-50">
       <header class="header">
@@ -185,14 +213,14 @@ function render() {
                 class="input-mode-button ${inputMode === 'scanner' ? 'input-mode-button-active' : ''}"
                 type="button"
                 aria-pressed="${inputMode === 'scanner'}"
-                ${modeSwitchDisabled() ? 'disabled' : ''}
+                ${modeSwitchDisabled('scanner') ? 'disabled' : ''}
               >Scanner</button>
               <button
                 id="cameraModeButton"
                 class="input-mode-button ${inputMode === 'camera' ? 'input-mode-button-active' : ''}"
                 type="button"
                 aria-pressed="${inputMode === 'camera'}"
-                ${modeSwitchDisabled() ? 'disabled' : ''}
+                ${modeSwitchDisabled('camera') ? 'disabled' : ''}
               >Kamera</button>
             </div>
 
@@ -213,15 +241,7 @@ function render() {
                   Gunakan scanner USB/Bluetooth atau ketik payload secara manual. Klik di mana saja untuk re-focus.
                 </p>
               </div>
-            ` : `
-              <div class="camera-panel">
-                <label class="scan-label">
-                  ${racePackMode ? 'Scan Kamera untuk Penyerahan Race Pack' : 'Scan QR Code dengan Kamera'}
-                </label>
-                <span id="cameraStatus" class="camera-status ${cameraActive ? 'camera-status-active' : ''}">${escapeHtml(cameraStatusMessage)}</span>
-                <video id="cameraPreview" class="camera-preview ${cameraActive ? 'camera-preview-active' : ''}" muted playsinline></video>
-              </div>
-            `}
+            ` : renderCameraPanel()}
           </div>
         </form>
 
@@ -251,9 +271,73 @@ function render() {
   document.getElementById('logoutButton')?.addEventListener('click', () => void logout());
   document.getElementById('scannerModeButton')?.addEventListener('click', () => void setInputMode('scanner'));
   document.getElementById('cameraModeButton')?.addEventListener('click', () => void setInputMode('camera'));
+  document.getElementById('cameraRetryButton')?.addEventListener('click', () => retryCamera());
+  document.getElementById('cameraFallbackButton')?.addEventListener('click', () => void setInputMode('scanner'));
+  document.getElementById('torchButton')?.addEventListener('click', () => void cameraScanner.setTorch(!cameraCapabilities.torchEnabled));
+  document.getElementById('zoomControl')?.addEventListener('input', (event) => {
+    const value = Number((event.target as HTMLInputElement).value);
+    if (Number.isFinite(value)) void cameraScanner.setZoom(value);
+  });
 
-  if (inputMode === 'camera' && cameraRequested && !cameraControls && !cameraStarting) void startCamera();
+  if (inputMode === 'camera') {
+    cameraScanner.attachVideo(document.getElementById('cameraPreview') as HTMLVideoElement | null);
+  }
+  if (inputMode === 'camera' && cameraRequested && !cameraScanner.isActive() && !cameraScanner.isStarting() && !cameraUnsafe()) {
+    startCameraIfPossible();
+  }
   focusInput();
+}
+
+function renderCameraPanel(): string {
+  const isActive = cameraScanner.isActive();
+  const isRecovering = cameraScanner.isRecovering();
+  const statusClass = isRecovering ? 'camera-state-recovering' : isActive ? 'camera-state-active' : cameraStatus.state === 'error' ? 'camera-state-error' : '';
+  const torchControl = cameraCapabilities.torch ? `
+    <button id="torchButton" class="camera-control-button ${cameraCapabilities.torchEnabled ? 'camera-control-button-active' : ''}" type="button" aria-pressed="${cameraCapabilities.torchEnabled}" aria-label="${cameraCapabilities.torchEnabled ? 'Matikan lampu kamera' : 'Nyalakan lampu kamera'}">
+      ${cameraCapabilities.torchEnabled ? 'Lampu On' : 'Lampu'}
+    </button>
+  ` : '';
+  const zoomControl = cameraCapabilities.zoom ? `
+    <label class="camera-zoom-control">
+      <span>Zoom</span>
+      <input id="zoomControl" type="range" min="${cameraCapabilities.zoom.min}" max="${cameraCapabilities.zoom.max}" step="${cameraCapabilities.zoom.step}" value="${cameraCapabilities.zoom.value}" aria-label="Zoom kamera" />
+    </label>
+  ` : '';
+  const errorActions = cameraStatus.canRetry ? `
+    <div class="camera-error-actions">
+      <button id="cameraRetryButton" class="btn btn-success" type="button">Coba Kamera Lagi</button>
+      <button id="cameraFallbackButton" class="btn btn-secondary" type="button">Gunakan Scanner</button>
+    </div>
+  ` : '';
+
+  return `
+    <div id="cameraPanel" class="camera-panel ${statusClass}">
+      <div class="camera-panel-header">
+        <div>
+          <label class="scan-label">
+            ${racePackMode ? 'Scan Kamera untuk Penyerahan Race Pack' : 'Scan QR Code dengan Kamera'}
+          </label>
+          <p class="camera-helper">Posisikan QR di dalam kotak. Semua frame diproses lokal di browser.</p>
+        </div>
+        <span class="camera-mode-pill">${isRecovering ? 'Recovery' : isActive ? 'Live' : 'Standby'}</span>
+      </div>
+      <div class="camera-viewport">
+        <video id="cameraPreview" class="camera-preview ${isActive ? 'camera-preview-active' : ''}" muted playsinline></video>
+        <div class="camera-viewfinder" aria-hidden="true">
+          <span class="corner corner-tl"></span>
+          <span class="corner corner-tr"></span>
+          <span class="corner corner-bl"></span>
+          <span class="corner corner-br"></span>
+        </div>
+        <div class="camera-status-card">
+          <span id="cameraStatus" class="camera-status ${isActive ? 'camera-status-active' : ''}">${escapeHtml(cameraStatus.message)}</span>
+          <span id="cameraStatusDetail" class="camera-status-detail">${escapeHtml(cameraStatus.detail)}</span>
+        </div>
+      </div>
+      ${(torchControl || zoomControl) ? `<div class="camera-controls">${torchControl}${zoomControl}</div>` : ''}
+      ${errorActions}
+    </div>
+  `;
 }
 
 function currentDisplayStatus(): DisplayStatus {
@@ -417,37 +501,53 @@ function setScannerControlsDisabled(disabled: boolean) {
 
 function updateCameraUI() {
   const status = document.getElementById('cameraStatus');
+  const detail = document.getElementById('cameraStatusDetail');
+  const panel = document.getElementById('cameraPanel');
   const preview = document.getElementById('cameraPreview');
+  const pill = document.querySelector<HTMLElement>('.camera-mode-pill');
   const scannerModeButton = document.getElementById('scannerModeButton') as HTMLButtonElement | null;
   const cameraModeButton = document.getElementById('cameraModeButton') as HTMLButtonElement | null;
-  const switchDisabled = modeSwitchDisabled();
+  const torchButton = document.getElementById('torchButton') as HTMLButtonElement | null;
+  const zoomControl = document.getElementById('zoomControl') as HTMLInputElement | null;
 
+  const isActive = cameraScanner.isActive();
+  const isRecovering = cameraScanner.isRecovering();
+  const stateClass = isRecovering ? 'camera-state-recovering' : isActive ? 'camera-state-active' : cameraStatus.state === 'error' ? 'camera-state-error' : '';
+
+  if (panel) panel.className = `camera-panel ${stateClass}`;
+  if (preview) preview.className = `camera-preview ${isActive ? 'camera-preview-active' : ''}`;
+  if (pill) pill.textContent = isRecovering ? 'Recovery' : isActive ? 'Live' : 'Standby';
   if (status) {
-    status.textContent = cameraStatusMessage;
-    status.className = `camera-status ${cameraActive ? 'camera-status-active' : ''}`;
+    status.textContent = cameraStatus.message;
+    status.className = `camera-status ${isActive ? 'camera-status-active' : ''}`;
   }
-  if (preview) {
-    preview.className = `camera-preview ${cameraActive ? 'camera-preview-active' : ''}`;
+  if (detail) detail.textContent = cameraStatus.detail;
+  if (scannerModeButton) scannerModeButton.disabled = modeSwitchDisabled('scanner');
+  if (cameraModeButton) cameraModeButton.disabled = modeSwitchDisabled('camera');
+  if (torchButton) {
+    torchButton.textContent = cameraCapabilities.torchEnabled ? 'Lampu On' : 'Lampu';
+    torchButton.className = `camera-control-button ${cameraCapabilities.torchEnabled ? 'camera-control-button-active' : ''}`;
+    torchButton.setAttribute('aria-pressed', String(cameraCapabilities.torchEnabled));
   }
-  if (scannerModeButton) scannerModeButton.disabled = switchDisabled;
-  if (cameraModeButton) cameraModeButton.disabled = switchDisabled;
+  if (zoomControl && cameraCapabilities.zoom) zoomControl.value = String(cameraCapabilities.zoom.value);
 }
 
 function cameraUnsafe(): boolean {
-  return Boolean(isProcessing || activeVerification || loginModal);
+  return Boolean(isProcessing || activeVerification || loginModal || cameraPagePaused);
 }
 
-function modeSwitchDisabled(): boolean {
-  return cameraStarting || cameraUnsafe();
+function modeSwitchDisabled(mode: InputMode): boolean {
+  if (cameraUnsafe()) return true;
+  return mode === 'camera' && cameraScanner.isStarting();
 }
 
 function setInputMode(mode: InputMode) {
-  if (mode === inputMode || modeSwitchDisabled()) return;
+  if (mode === inputMode || modeSwitchDisabled(mode)) return;
 
   if (mode === 'scanner') {
     inputMode = 'scanner';
     cameraRequested = false;
-    stopCameraStream('Kamera dimatikan. Scanner/manual aktif.');
+    cameraScanner.stop('Kamera dimatikan. Scanner/manual aktif.');
     render();
     focusInput();
     return;
@@ -455,97 +555,55 @@ function setInputMode(mode: InputMode) {
 
   inputMode = 'camera';
   cameraRequested = true;
-  cameraStatusMessage = 'Memulai kamera...';
   render();
 }
 
-async function withCameraTimeout(promise: Promise<IScannerControls>): Promise<IScannerControls> {
-  return Promise.race([
-    promise,
-    new Promise<IScannerControls>((_, reject) => {
-      setTimeout(() => reject(new Error('camera_timeout')), 10000);
-    }),
-  ]);
-}
-
-async function startCamera() {
-  if (inputMode !== 'camera' || !cameraRequested || cameraStarting || cameraControls || cameraUnsafe()) return;
-
+function startCameraIfPossible() {
   const preview = document.getElementById('cameraPreview') as HTMLVideoElement | null;
-  if (!qrReader || !preview || !navigator.mediaDevices?.getUserMedia) {
-    returnToScanner('Kamera tidak tersedia di browser/perangkat ini. Scanner/manual diaktifkan.');
-    return;
-  }
-
-  cameraStarting = true;
-  cameraStatusMessage = 'Meminta izin kamera...';
-  updateCameraUI();
-
-  let failureMessage = '';
-
-  try {
-    const controls = await withCameraTimeout(qrReader.decodeFromVideoDevice(undefined, preview, (result) => {
-      if (!result || inputMode !== 'camera' || !cameraRequested) return;
-      const payload = result.getText();
-      const now = Date.now();
-      if (payload === lastCameraPayload && now - lastCameraScanAt < 2000) return;
-      lastCameraPayload = payload;
-      lastCameraScanAt = now;
-      void submitScanPayload(payload);
-    }));
-
-    if (inputMode !== 'camera' || !cameraRequested || cameraUnsafe()) {
-      controls.stop();
-      cameraStatusMessage = 'Kamera dijeda sementara.';
-      return;
-    }
-
-    cameraControls = controls;
-    cameraActive = true;
-    cameraStatusMessage = 'Kamera aktif. Arahkan ke QR tiket.';
-  } catch (caught) {
-    failureMessage = caught instanceof DOMException && caught.name === 'NotAllowedError'
-      ? 'Izin kamera ditolak. Scanner/manual diaktifkan.'
-      : caught instanceof Error && caught.message === 'camera_timeout'
-        ? 'Kamera terlalu lama merespons. Scanner/manual diaktifkan.'
-        : 'Kamera tidak bisa dibuka. Scanner/manual diaktifkan.';
-  } finally {
-    cameraStarting = false;
-    if (failureMessage) {
-      returnToScanner(failureMessage);
-    } else {
-      updateCameraUI();
-    }
-  }
+  if (!preview) return;
+  void cameraScanner.start(preview);
 }
 
-function stopCameraStream(message: string) {
-  cameraControls?.stop();
-  cameraControls = null;
-  cameraActive = false;
-  cameraStatusMessage = message;
-  updateCameraUI();
-}
-
-function returnToScanner(message: string) {
-  cameraRequested = false;
-  cameraControls?.stop();
-  cameraControls = null;
-  BrowserCodeReader.releaseAllStreams();
-  cameraActive = false;
-  cameraStatusMessage = message;
-  inputMode = 'scanner';
-  render();
-  showResult('error', message);
-  focusInput();
+function retryCamera() {
+  cameraRequested = true;
+  inputMode = 'camera';
+  const preview = document.getElementById('cameraPreview') as HTMLVideoElement | null;
+  if (preview) cameraScanner.attachVideo(preview);
+  cameraScanner.retry();
 }
 
 function pauseCameraForUnsafeState() {
-  if (cameraControls) stopCameraStream('Kamera dijeda sementara.');
+  cameraScanner.pause('Kamera dijeda sementara.');
 }
 
 function resumeCameraIfSafe() {
-  if (inputMode === 'camera' && cameraRequested && !cameraControls && !cameraStarting && !cameraUnsafe()) void startCamera();
+  if (inputMode !== 'camera' || !cameraRequested || cameraUnsafe()) return;
+  if (cameraScanner.isActive()) {
+    cameraScanner.resume();
+    return;
+  }
+  startCameraIfPossible();
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'hidden') {
+    cameraPagePaused = true;
+    cameraScanner.stop('Kamera dijeda karena tab tidak aktif.');
+    return;
+  }
+
+  cameraPagePaused = false;
+  resumeCameraIfSafe();
+}
+
+function handlePageHide() {
+  cameraPagePaused = true;
+  cameraScanner.stop('Kamera dijeda karena halaman ditutup.');
+}
+
+function handlePageShow() {
+  cameraPagePaused = false;
+  resumeCameraIfSafe();
 }
 
 function playBeep(type: 'success' | 'error') {
@@ -789,7 +847,18 @@ async function submitScanPayload(payload: string) {
   const orderId = extractOrderId(payload);
   if (!orderId) {
     showResult('error', 'QR Code tidak valid — format URL tidak dikenali');
+    resumeCameraIfSafe();
     return;
+  }
+
+  if (inputMode === 'camera') {
+    const now = Date.now();
+    if (payload === lastCameraPayload && now - lastCameraScanAt < 2000) {
+      resumeCameraIfSafe();
+      return;
+    }
+    lastCameraPayload = payload;
+    lastCameraScanAt = now;
   }
 
   pauseCameraForUnsafeState();
@@ -821,17 +890,6 @@ async function submitScanPayload(payload: string) {
     resumeCameraIfSafe();
     focusInput();
   }
-}
-
-function extractOrderId(input: string): string | null {
-  const ulidPattern = '[0-9A-HJ-NP-Za-hj-np-z]{26}';
-  const urlMatch = input.match(new RegExp(`/ticket/(${ulidPattern})`, 'i'));
-  if (urlMatch) return urlMatch[1];
-
-  const rawMatch = input.match(new RegExp(`^(${ulidPattern})$`, 'i'));
-  if (rawMatch) return input;
-
-  return null;
 }
 
 function handleScanResult(data: ScanResult) {

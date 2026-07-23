@@ -10,27 +10,31 @@ PostgreSQL.
 
 ## Status Implementasi
 
-Implementasi kamera saat ini berada di `web/src/main.ts` dan menggunakan
-`BrowserQRCodeReader` dari `@zxing/browser`.
+Implementasi kamera berada di `web/src/main.ts` dengan lifecycle dan decoder di
+`web/src/scanner/*`.
 
 Alur aktual:
 
 ```text
-Video kamera
+Video kamera belakang
+    |
+    +--> BarcodeDetector native bila tersedia
+    |
+    +--> ZXing QR-only normal
+    |
+    +--> Canvas preprocessing lokal
+             |
+             +--> ZXing recovery
     |
     v
-BrowserQRCodeReader (ZXing)
-    |
-    v
-Payload QR
+Payload QR utuh
     |
     v
 POST /api/scans/validate
 ```
 
-Native `BarcodeDetector` belum digunakan. Preprocessing gambar dan mode recovery
-juga belum tersedia. Dengan demikian, isi dokumen ini adalah rancangan target,
-bukan deskripsi fitur yang sudah selesai.
+Frame dan canvas recovery hanya diproses lokal di browser. Backend tetap menjadi
+sumber validasi tiket dan pickup.
 
 ## Tujuan
 

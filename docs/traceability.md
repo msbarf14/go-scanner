@@ -15,6 +15,7 @@ Status:
 | AUTH | Role/permission Laravel Spatie guard `web` | `internal/auth/service.go`, `internal/auth/sql/is_authorized.sql` | `internal/auth/repository_test.go`, `internal/auth/service_test.go` | verified |
 | AUTH | Logout Race Pack tidak mengklaim sukses saat server gagal | `web/src/main.ts`, `internal/auth/handler.go` | Browser mock logout success/failure sebelumnya | verified |
 | CAM | Kamera browser sebagai input QR lokal | `web/src/main.ts`, `web/package.json` | Build frontend; fallback permission denied diuji headless sebelumnya | verified |
+| CAM | Kamera memakai BarcodeDetector, ZXing fallback, dan recovery canvas lokal | `web/src/main.ts`, `web/src/scanner/*`, `docs/barcode-recovery.md` | `npm --prefix web test`; perlu browser/device smoke | implemented |
 | CAM | USB keyboard wedge dan input manual tetap tersedia | `web/src/main.ts` | Browser smoke sebelumnya; input memakai submit path yang sama | verified |
 | DSP | Root display menerima keyboard wedge dengan overlay `debug=1` | `web/src/display.ts`, `web/src/display.css` | Browser smoke: hidden/debug input, focus recovery, scan submit, dan isolasi station lulus | verified |
 | CAM | Request/modal lock mencegah scan bertumpuk | `web/src/main.ts` | Browser mock P0: scan kedua saat modal terbuka tidak validate ulang | verified |
