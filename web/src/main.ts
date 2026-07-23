@@ -139,6 +139,12 @@ function render() {
             </div>
           </div>
           <div class="header-right">
+            <a class="header-link" href="/race-pack-pickups" aria-label="Data Pickup">
+              <svg class="header-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 17v-6h6v6m2 4H7a2 2 0 01-2-2V9.828a2 2 0 01.586-1.414l4.828-4.828a2 2 0 011.414-.586H17a2 2 0 012 2v14a2 2 0 01-2 2z" />
+              </svg>
+              <span class="header-action-label">Data Pickup</span>
+            </a>
             <label class="toggle-label">
               <span class="toggle-text ${racePackMode ? 'toggle-text-active' : ''}">Race Pack</span>
               <div class="toggle-wrapper">

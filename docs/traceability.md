@@ -25,6 +25,7 @@ Status:
 | PCK | Pickup wajib session dan CSRF | `internal/httpapi/router.go`, `internal/auth/handler.go` | `internal/httpapi/router_test.go` | verified |
 | PCK | Pickup memakai operator dari session | `internal/scanner/handler.go`, `internal/auth/handler.go` | Protected route context tests/smoke via router tests | verified |
 | PCK | Konfirmasi single-flight, tidak optimistic success | `web/src/main.ts`, `internal/scanner/sql/pickup.sql` | Browser mock P0 double confirm hanya satu pickup | verified |
+| PCK | Monitoring pickup menampilkan status akhir database dengan auth scanner | `internal/scanner/*`, `web/src/pickups.ts`, `web/src/pickups.css` | Build/test; browser mock anonymous/login/filter/logout tanpa pickup | verified |
 | UI | Status readiness dinamis | `web/src/main.ts`, `web/src/styles.css`, `/readyz` | Frontend build; outage path diuji mock sebelumnya | verified |
 | UI | Riwayat lokal sementara max 20 bukan audit | `web/src/main.ts`, `web/src/styles.css` | Implemented; perlu browser visual smoke setelah build | implemented |
 | PWA | Manifest start ke scanner dan service worker static-only | `web/public/manifest.webmanifest`, `web/public/service-worker.js`, `web/src/main.ts` | Implemented; perlu build dan asset check | implemented |

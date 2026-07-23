@@ -44,3 +44,15 @@ func ScannerHandler() http.Handler {
 		w.Write(data)
 	})
 }
+
+func PickupsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		data, err := distFS.ReadFile("dist/race-pack-pickups.html")
+		if err != nil {
+			http.Error(w, "Not found", http.StatusNotFound)
+			return
+		}
+		w.Write(data)
+	})
+}

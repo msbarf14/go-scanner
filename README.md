@@ -37,6 +37,16 @@ Input QR didukung melalui:
 - Scanner USB/Bluetooth keyboard wedge.
 - Input manual.
 
+### Data Pickup Race Pack — `/race-pack-pickups`
+
+Halaman monitoring untuk melihat status akhir peserta/order yang sudah melakukan pengambilan race pack.
+
+```text
+https://scanner.example.com/race-pack-pickups
+```
+
+Halaman memakai login operator yang sama dengan Race Pack. Saat belum login, data tetap kosong dan modal login ditampilkan. Data yang tersedia adalah waktu pickup, order, BIB, peserta, kategori, jersey, dan operator. Halaman ini bukan audit scan dan tidak memiliki data station.
+
 ## Fitur Utama
 
 - Mendukung full ticket URL, relative ticket path, dan raw order ULID.
@@ -177,7 +187,9 @@ VITE_ASSET_VERSION=11
 ```text
 GET  /                         Runner Display
 GET  /runner-scanner           Runner Scanner
+GET  /race-pack-pickups        Monitoring pickup race pack
 GET  /api/display              Data display per station
+GET  /api/race-pack-pickups    Daftar pickup race pack
 POST /api/scans/validate       Validasi tiket
 GET  /auth/session             Status session scanner
 GET  /auth/csrf                Token CSRF
@@ -206,7 +218,8 @@ make build
 
 - Pickup wajib online; tidak ada antrean atau sinkronisasi offline.
 - Riwayat browser bukan audit resmi.
-- Tidak ada dashboard laporan atau pembatalan pickup di aplikasi ini.
+- Halaman Data Pickup menampilkan status akhir database, bukan audit scan/station.
+- Tidak ada pembatalan pickup di aplikasi ini.
 - Kamera production wajib diuji pada Chrome Android dan Safari iOS melalui HTTPS.
 - Database user scanner harus menggunakan least privilege.
 

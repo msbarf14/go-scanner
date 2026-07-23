@@ -2,8 +2,10 @@ package scanner
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -95,6 +97,47 @@ func (h *Handler) Display(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h *Handler) ListPickups(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	outcome := "ok"
+	query := r.URL.Query()
+	defer func() {
+		if h.logger == nil {
+			return
+		}
+		h.logger.InfoContext(r.Context(), "pickup list outcome",
+			"request_id", contextutil.RequestIDFromContext(r.Context()),
+			"outcome", outcome,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"has_search", strings.TrimSpace(query.Get("q")) != "",
+			"has_category", strings.TrimSpace(query.Get("category")) != "",
+			"has_from", strings.TrimSpace(query.Get("picked_up_from")) != "",
+			"has_to", strings.TrimSpace(query.Get("picked_up_to")) != "",
+		)
+	}()
+
+	pickupQuery, ok := parsePickupListQuery(query)
+	if !ok {
+		outcome = string(OutcomeInvalidPayload)
+		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), "Filter daftar pickup tidak valid", nil)
+		return
+	}
+
+	result, err := h.service.ListPickups(r.Context(), pickupQuery)
+	if errors.Is(err, ErrInvalidPickupListQuery) {
+		outcome = string(OutcomeInvalidPayload)
+		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), "Filter daftar pickup tidak valid", nil)
+		return
+	}
+	if err != nil {
+		outcome = string(OutcomeDatabaseUnavailable)
+		respond.JSON(w, r, OutcomeDatabaseUnavailable.HTTPStatus(), string(OutcomeDatabaseUnavailable), OutcomeDatabaseUnavailable.Message(), nil)
+		return
+	}
+
+	respond.JSON(w, r, http.StatusOK, "ok", "Daftar race pack yang sudah diambil", result)
+}
+
 func (h *Handler) Pickup(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	loggedOutcome := OutcomeInternalError
@@ -139,6 +182,56 @@ func (h *Handler) Pickup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), data)
+}
+
+func parsePickupListQuery(values map[string][]string) (PickupListQuery, bool) {
+	query := PickupListQuery{
+		Search:   strings.TrimSpace(firstQueryValue(values, "q")),
+		Category: strings.TrimSpace(firstQueryValue(values, "category")),
+		Cursor:   strings.TrimSpace(firstQueryValue(values, "cursor")),
+	}
+
+	limitValue := strings.TrimSpace(firstQueryValue(values, "limit"))
+	if limitValue != "" {
+		limit, err := strconv.Atoi(limitValue)
+		if err != nil {
+			return PickupListQuery{}, false
+		}
+		query.Limit = limit
+	}
+
+	pickedUpFrom, ok := parseOptionalPickupTime(firstQueryValue(values, "picked_up_from"))
+	if !ok {
+		return PickupListQuery{}, false
+	}
+	query.PickedUpFrom = pickedUpFrom
+
+	pickedUpTo, ok := parseOptionalPickupTime(firstQueryValue(values, "picked_up_to"))
+	if !ok {
+		return PickupListQuery{}, false
+	}
+	query.PickedUpTo = pickedUpTo
+
+	return query, true
+}
+
+func firstQueryValue(values map[string][]string, key string) string {
+	if len(values[key]) == 0 {
+		return ""
+	}
+	return values[key][0]
+}
+
+func parseOptionalPickupTime(value string) (*time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, true
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return nil, false
+	}
+	return &parsed, true
 }
 
 func (h *Handler) logValidate(r *http.Request, start time.Time, outcome Outcome, station string, orderID string) {

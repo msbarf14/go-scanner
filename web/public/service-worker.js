@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fenturun-scanner-v4';
+const CACHE_NAME = 'fenturun-scanner-v5';
 const STATIC_ASSETS = [
   '/runner-scanner',
   '/runner-scanner.html',
@@ -31,7 +31,16 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/healthz' || url.pathname === '/readyz') {
+    event.respondWith(fetch(request));
+    return;
+  }
+
+  if (url.pathname === '/' || url.pathname === '/race-pack-pickups' || url.pathname === '/race-pack-pickups.html') {
     event.respondWith(fetch(request));
     return;
   }

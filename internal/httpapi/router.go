@@ -41,6 +41,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/display", deps.Scanner.Display)
 	mux.HandleFunc("POST /api/scans/validate", deps.Scanner.Validate)
+	mux.Handle("GET /api/race-pack-pickups", deps.Auth.RequireAuth(http.HandlerFunc(deps.Scanner.ListPickups)))
 	mux.Handle("GET /auth/session", http.HandlerFunc(deps.Auth.Session))
 
 	protectedMux := http.NewServeMux()
@@ -77,6 +78,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	displayHandler := web.DisplayHandler()
 	scannerHandler := web.ScannerHandler()
+	pickupsHandler := web.PickupsHandler()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -88,6 +90,11 @@ func NewRouter(deps Deps) http.Handler {
 
 		if path == "/runner-scanner" || strings.HasPrefix(path, "/runner-scanner/") {
 			scannerHandler.ServeHTTP(w, r)
+			return
+		}
+
+		if path == "/race-pack-pickups" || strings.HasPrefix(path, "/race-pack-pickups/") {
+			pickupsHandler.ServeHTTP(w, r)
 			return
 		}
 

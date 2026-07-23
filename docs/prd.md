@@ -477,7 +477,20 @@ Data yang ditampilkan pada modal verifikasi:
 - Kategori ticket.
 - Ukuran jersey.
 
-### 12.4 Status Visual
+### 12.4 Halaman Data Pickup Race Pack (`/race-pack-pickups`)
+
+Halaman monitoring operator untuk peserta/order yang sudah mengambil race pack.
+
+Komponen:
+
+- Login modal memakai session dan otorisasi Race Pack yang sama dengan Runner Scanner.
+- Saat belum login, area data kosong dan tidak memanggil API daftar pickup.
+- Tabel desktop dan kartu mobile berisi waktu pickup, nomor/status order, nomor BIB, nama peserta, nama BIB, kategori, ukuran jersey, dan operator.
+- Pencarian order/BIB/nama, filter waktu pickup, filter kategori, refresh otomatis, refresh manual, dan pagination cursor.
+- Catatan jelas bahwa data adalah status akhir database, bukan audit scan dan tidak memiliki station.
+- API dan halaman monitoring tidak boleh menyimpan data peserta di cache browser/service worker.
+
+### 12.5 Status Visual
 
 | Kondisi | Warna | Feedback suara |
 |---|---|---|

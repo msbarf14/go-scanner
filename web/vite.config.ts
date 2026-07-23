@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
         input: {
           display: resolve(__dirname, 'runner-display.html'),
           scanner: resolve(__dirname, 'runner-scanner.html'),
+          pickups: resolve(__dirname, 'race-pack-pickups.html'),
         },
       },
     },

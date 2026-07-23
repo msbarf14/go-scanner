@@ -84,6 +84,13 @@ Aturan mutasi:
 - Waktu pickup berasal dari PostgreSQL `CURRENT_TIMESTAMP`.
 - Operator berasal dari session, bukan request body.
 
+Aturan read-only daftar pickup:
+
+- `GET /api/race-pack-pickups` hanya membaca order non-deleted dengan `race_pack_picked_up_at IS NOT NULL`.
+- Daftar pickup menampilkan status akhir database, bukan audit scan dan bukan data station.
+- Cursor pagination memakai urutan `race_pack_picked_up_at DESC, orders.id DESC`.
+- Operator ditampilkan dari `users.name` melalui `race_pack_picked_up_by`; ULID operator tidak perlu ditampilkan pada UI.
+
 ## Tabel `participants`
 
 Kolom yang digunakan scanner:

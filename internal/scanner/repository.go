@@ -19,6 +19,9 @@ var pickupSQL string
 //go:embed sql/diagnose_pickup.sql
 var diagnosePickupSQL string
 
+//go:embed sql/list_pickups.sql
+var listPickupsSQL string
+
 type Repository struct {
 	pool *pgxpool.Pool
 }
@@ -117,4 +120,67 @@ func (r *Repository) DiagnosePickup(ctx context.Context, orderID string) (*Diagn
 		return nil, err
 	}
 	return &d, nil
+}
+
+type PickupListFilter struct {
+	SearchPattern string
+	Category      string
+	PickedUpFrom  *time.Time
+	PickedUpTo    *time.Time
+	CursorTime    *time.Time
+	CursorID      string
+	Limit         int
+}
+
+type PickupListRow struct {
+	OrderID         string
+	OrderNumber     *string
+	OrderStatus     *string
+	PickedUpAt      time.Time
+	ParticipantName *string
+	BibName         *string
+	BIBNumber       *string
+	JerseySize      *string
+	TicketCategory  *string
+	PickedUpByName  *string
+}
+
+func (r *Repository) ListPickups(ctx context.Context, filter PickupListFilter) ([]PickupListRow, error) {
+	rows, err := r.pool.Query(ctx, listPickupsSQL,
+		filter.SearchPattern,
+		filter.Category,
+		filter.PickedUpFrom,
+		filter.PickedUpTo,
+		filter.CursorTime,
+		filter.CursorID,
+		filter.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []PickupListRow{}
+	for rows.Next() {
+		var row PickupListRow
+		if err := rows.Scan(
+			&row.OrderID,
+			&row.OrderNumber,
+			&row.OrderStatus,
+			&row.PickedUpAt,
+			&row.ParticipantName,
+			&row.BibName,
+			&row.BIBNumber,
+			&row.JerseySize,
+			&row.TicketCategory,
+			&row.PickedUpByName,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return results, nil
 }

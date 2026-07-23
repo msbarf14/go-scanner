@@ -30,6 +30,33 @@ func TestValidateDoesNotRequireCSRF(t *testing.T) {
 	}
 }
 
+func TestPickupsPageServesHTML(t *testing.T) {
+	handler := newTestRouter(t)
+	request := httptest.NewRequest(http.MethodGet, "/race-pack-pickups", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if !strings.Contains(response.Body.String(), "Data Pickup Race Pack") {
+		t.Fatalf("body does not contain pickups title")
+	}
+}
+
+func TestPickupListRequiresSessionWithoutCSRF(t *testing.T) {
+	handler := newTestRouter(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/race-pack-pickups", nil)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestPickupRequiresCSRF(t *testing.T) {
 	handler := newTestRouter(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/orders/01JXXXXXXXXXXXXXXXXXXXXXXX/pickup", strings.NewReader(`{}`))
