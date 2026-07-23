@@ -37,6 +37,11 @@ Input QR didukung melalui:
 - Scanner USB/Bluetooth keyboard wedge.
 - Input manual.
 
+Rancangan peningkatan kamera dengan native `BarcodeDetector`, fallback ZXing,
+dan recovery QR rusak ringan dijelaskan di
+[`docs/barcode-recovery.md`](docs/barcode-recovery.md). Fitur recovery tersebut
+belum tersedia pada implementasi saat ini.
+
 ### Data Pickup Race Pack — `/race-pack-pickups`
 
 Halaman monitoring untuk melihat status akhir peserta/order yang sudah melakukan pengambilan race pack.
@@ -225,6 +230,7 @@ make build
 
 ## Dokumentasi Lanjutan
 
+- [`docs/barcode-recovery.md`](docs/barcode-recovery.md) — rancangan `BarcodeDetector`, fallback ZXing, dan recovery QR rusak ringan.
 - [`docs/prd.md`](docs/prd.md) — kebutuhan produk dan acceptance criteria.
 - [`docs/schema-contract.md`](docs/schema-contract.md) — kontrak schema database.
 - [`docs/traceability.md`](docs/traceability.md) — status requirement dan verifikasi.
