@@ -5,7 +5,11 @@ const ASSET_BASE_URL = (import.meta.env.VITE_ASSET_BASE_URL || 'https://r2.fentu
 const ASSET_VERSION = import.meta.env.VITE_ASSET_VERSION ?? '11';
 
 interface DisplayData {
-  order: {
+  v: number;
+  scan_id: string;
+  type: 'order' | 'external_participant';
+  id: string;
+  order?: {
     id: string;
     number?: string;
     race_pack_picked_up: boolean;
@@ -33,11 +37,22 @@ interface DisplayResponse {
 
 interface ValidateResponse {
   outcome: string;
+  message?: string;
+}
+
+type FallbackKind = 'not_found' | 'invalid' | 'error';
+
+interface DisplayFallback {
+  kind: FallbackKind;
+  title: string;
+  message: string;
 }
 
 let station = 1;
 let debugScanner = false;
 let currentData: DisplayData | null = null;
+let fallback: DisplayFallback | null = null;
+let fallbackTimer: number | null = null;
 let show = false;
 let scanProcessing = false;
 let scannerInput: HTMLInputElement | null = null;
@@ -146,13 +161,69 @@ async function handleScanSubmit(event: SubmitEvent) {
     const data: ValidateResponse = await response.json();
 
     if (data.outcome === 'valid' || data.outcome === 'already_picked_up') {
+      clearFallback();
       await fetchDisplayData();
+    } else {
+      showScanFallback(data.outcome, data.message);
     }
   } catch {
+    showFallback({
+      kind: 'error',
+      title: 'KONEKSI BERMASALAH',
+      message: 'Scan belum bisa diproses. Coba ulangi setelah koneksi stabil.',
+    });
   } finally {
     scanProcessing = false;
     focusScannerInput();
   }
+}
+
+function showScanFallback(outcome: string, message?: string) {
+  if (outcome === 'not_found') {
+    showFallback({
+      kind: 'not_found',
+      title: 'TIKET TIDAK DITEMUKAN',
+      message: 'QR Code atau Order ID tidak ditemukan. Silakan cek tiket atau hubungi petugas.',
+    });
+    return;
+  }
+
+  showFallback({
+    kind: 'invalid',
+    title: 'QR CODE TIDAK VALID',
+    message: message || 'Format QR Code atau Order ID tidak dikenali. Silakan scan ulang tiket yang benar.',
+  });
+}
+
+function showFallback(nextFallback: DisplayFallback) {
+  if (fallbackTimer !== null) {
+    window.clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  }
+
+  currentData = null;
+  fallback = nextFallback;
+  show = false;
+  render();
+  setTimeout(() => {
+    show = true;
+    render();
+  }, 50);
+
+  fallbackTimer = window.setTimeout(() => {
+    fallback = null;
+    fallbackTimer = null;
+    show = false;
+    render();
+  }, 4500);
+}
+
+function clearFallback() {
+  if (fallbackTimer !== null) {
+    window.clearTimeout(fallbackTimer);
+    fallbackTimer = null;
+  }
+  fallback = null;
 }
 
 async function fetchDisplayData() {
@@ -163,7 +234,9 @@ async function fetchDisplayData() {
     const data: DisplayResponse = await res.json();
     const newData = data.data.display;
 
-    if (newData && (!currentData || newData.order.id !== currentData.order.id || newData.scanned_at !== currentData.scanned_at)) {
+    if (fallback) return;
+
+    if (newData && (!currentData || newData.scan_id !== currentData.scan_id)) {
       currentData = newData;
       show = false;
       render();
@@ -229,7 +302,17 @@ function render() {
   const displayName = bibName || participantName;
   const showLegalName = Boolean(bibName && bibName !== participantName);
 
-  displayMain.innerHTML = currentData ? `
+  displayMain.innerHTML = fallback ? `
+    <section class="fallback-content fallback-${fallback.kind} ${show ? 'runner-content-show' : 'runner-content-hide'}" aria-live="assertive">
+      <div class="fallback-icon-wrapper">
+        <svg class="fallback-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12V16.5zm9-4.5a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      </div>
+      <h2 class="fallback-title">${escapeHtml(fallback.title)}</h2>
+      <p class="fallback-message">${escapeHtml(fallback.message)}</p>
+    </section>
+  ` : currentData ? `
     <section class="runner-content ${show ? 'runner-content-show' : 'runner-content-hide'}" aria-live="polite">
       <div class="runner-welcome-row">
         <h1 class="welcome-title">WELCOME, RUNNER!</h1>

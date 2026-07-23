@@ -11,8 +11,8 @@ import {
   unreadableFeedback,
   type CameraFeedback,
 } from './scanner/feedback';
-import { normalizeManualLookup, type ManualLookupType } from './scanner/manual-lookup';
-import { extractOrderId } from './scanner/parser';
+import { lookupTypeAllowed, lookupTypeForSource, normalizeManualLookup, type ManualLookupSource, type ManualLookupType } from './scanner/manual-lookup';
+import { extractScanTarget, type ScanTarget } from './scanner/parser';
 import type { CameraCapabilities, CameraStatus } from './scanner/types';
 
 const API_BASE = '';
@@ -31,6 +31,13 @@ interface ApiResponse<T = Record<string, unknown>> {
 }
 
 interface ScanData {
+  target?: {
+    type: 'order' | 'external_participant';
+    id: string;
+    number?: string;
+    race_pack_picked_up: boolean;
+    race_pack_picked_up_at?: string;
+  };
   order?: {
     id: string;
     number?: string;
@@ -69,7 +76,7 @@ interface HistoryItem {
 
 interface VerificationState {
   modal: HTMLElement;
-  orderId: string;
+  target: ScanTarget;
   confirming: boolean;
 }
 
@@ -85,6 +92,7 @@ let activeVerification: VerificationState | null = null;
 let connectionStatus: ConnectionStatus = navigator.onLine ? 'checking' : 'offline';
 let inputMode: InputMode = 'scanner';
 let manualLookupType: ManualLookupType = 'ticket';
+let manualLookupSource: ManualLookupSource = 'online';
 let cameraRequested = false;
 let cameraStatus: CameraStatus = {
   state: 'idle',
@@ -186,6 +194,9 @@ function render() {
   document.querySelectorAll<HTMLButtonElement>('[data-manual-lookup-type]').forEach((button) => {
     button.addEventListener('click', () => setManualLookupType(button.dataset.manualLookupType as ManualLookupType));
   });
+  document.querySelectorAll<HTMLButtonElement>('[data-manual-source]').forEach((button) => {
+    button.addEventListener('click', () => setManualLookupSource(button.dataset.manualSource as ManualLookupSource));
+  });
   document.getElementById('cameraRetryButton')?.addEventListener('click', () => retryCamera());
   document.getElementById('cameraFallbackButton')?.addEventListener('click', () => void setInputMode('scanner'));
   document.getElementById('cameraFeedbackDismiss')?.addEventListener('click', () => {
@@ -240,10 +251,23 @@ function renderManualLookupButtons(): string {
           type="button"
           data-manual-lookup-type="${option}"
           aria-pressed="${manualLookupType === option}"
+          ${racePackMode && !lookupTypeAllowed(manualLookupSource, option) ? 'disabled' : ''}
         >${manualLookupLabel(option)}</button>
       `).join('')}
     </div>
   `;
+}
+
+function renderManualSourceToggle(): string {
+  if (!racePackMode) return '';
+  return `
+    <div class="manual-source-row">
+      <span class="manual-source-label">Sumber peserta</span>
+      <div class="manual-source-control" role="group" aria-label="Pilih sumber peserta">
+        <button type="button" class="manual-source-button ${manualLookupSource === 'online' ? 'manual-source-button-active' : ''}" data-manual-source="online" aria-pressed="${manualLookupSource === 'online'}">Online</button>
+        <button type="button" class="manual-source-button ${manualLookupSource === 'vip' ? 'manual-source-button-active' : ''}" data-manual-source="vip" aria-pressed="${manualLookupSource === 'vip'}">VIP</button>
+      </div>
+    </div>`;
 }
 
 function renderScannerPage(): string {
@@ -304,6 +328,7 @@ function renderScannerPage(): string {
               <button id="cameraModeButton" class="input-mode-button" type="button" aria-pressed="false" ${modeSwitchDisabled('camera') ? 'disabled' : ''}>Kamera</button>
             </div>
             <div class="scanner-mode-panel">
+              ${renderManualSourceToggle()}
               ${renderManualLookupButtons()}
               <label class="scan-label" for="scanInput">
                 ${escapeHtml(scanInputLabel())}
@@ -604,6 +629,7 @@ function setScannerControlsDisabled(disabled: boolean) {
   const scannerModeButton = document.getElementById('scannerModeButton') as HTMLButtonElement | null;
   const cameraModeButton = document.getElementById('cameraModeButton') as HTMLButtonElement | null;
   const manualLookupButtons = document.querySelectorAll<HTMLButtonElement>('[data-manual-lookup-type]');
+  const manualSourceButtons = document.querySelectorAll<HTMLButtonElement>('[data-manual-source]');
 
   if (input) input.disabled = disabled;
   if (toggle) toggle.disabled = disabled;
@@ -611,6 +637,9 @@ function setScannerControlsDisabled(disabled: boolean) {
   if (scannerModeButton) scannerModeButton.disabled = disabled;
   if (cameraModeButton) cameraModeButton.disabled = disabled;
   manualLookupButtons.forEach((button) => {
+    button.disabled = disabled;
+  });
+  manualSourceButtons.forEach((button) => {
     button.disabled = disabled;
   });
 }
@@ -661,6 +690,13 @@ function setManualLookupType(type: ManualLookupType) {
   if (type !== 'ticket' && type !== 'order_suffix' && type !== 'bib_number') return;
   if (manualLookupType === type) return;
   manualLookupType = type;
+  render();
+}
+
+function setManualLookupSource(source: ManualLookupSource) {
+  if (source !== 'online' && source !== 'vip') return;
+  manualLookupSource = source;
+  manualLookupType = lookupTypeForSource(source, manualLookupType);
   render();
 }
 
@@ -969,9 +1005,9 @@ async function submitScanPayload(payload: string) {
     return;
   }
 
-  const orderId = extractOrderId(payload);
-  const useManualLookup = inputMode === 'scanner' && manualLookupType !== 'ticket' && !orderId;
-  if (!orderId && !useManualLookup) {
+  const scanTarget = extractScanTarget(payload);
+  const useManualLookup = inputMode === 'scanner' && manualLookupType !== 'ticket' && !scanTarget;
+  if (!scanTarget && !useManualLookup) {
     if (inputMode === 'camera') setCameraFeedback(unreadableFeedback('QR Code tidak valid. Posisikan QR penuh di kotak, kurangi pantulan, atau gunakan Scanner/manual.'));
     showResult('error', 'QR Code tidak valid — format URL tidak dikenali');
     resumeCameraIfSafe();
@@ -1009,9 +1045,14 @@ async function submitScanPayload(payload: string) {
 
   try {
     const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    let requestURL = `${API_BASE}/api/scans/validate`;
+    let requestURL = `${API_BASE}${racePackMode ? '/api/race-pack/scans/validate' : '/api/scans/validate'}`;
     let requestBody = JSON.stringify({ payload, station: station.toString() });
     let requestCredentials: RequestCredentials | undefined;
+
+    if (racePackMode) {
+      requestHeaders['X-CSRF-Token'] = await ensureCSRFToken();
+      requestCredentials = 'same-origin';
+    }
 
     if (useManualLookup && manualPayload) {
       requestURL = `${API_BASE}${racePackMode ? '/api/scans/manual-validate' : '/api/scans/manual-display'}`;
@@ -1019,7 +1060,7 @@ async function submitScanPayload(payload: string) {
         requestHeaders['X-CSRF-Token'] = await ensureCSRFToken();
         requestCredentials = 'same-origin';
       }
-      requestBody = JSON.stringify({ lookup_type: manualLookupType, payload: manualPayload, station: station.toString() });
+      requestBody = JSON.stringify({ lookup_type: manualLookupType, source: racePackMode ? manualLookupSource : 'online', payload: manualPayload, station: station.toString() });
     }
 
     const response = await fetch(requestURL, {
@@ -1036,7 +1077,7 @@ async function submitScanPayload(payload: string) {
     }
 
     const data: ScanResult = await response.json();
-    if (useManualLookup && (response.status === 401 || response.status === 403)) {
+    if (racePackMode && (response.status === 401 || response.status === 403)) {
       authStatus = 'anonymous';
       csrfToken = null;
       racePackMode = false;
@@ -1099,11 +1140,12 @@ function showVerification(data: ScanResult) {
   if (activeVerification) return;
 
   const order = data.data?.order;
+  const target = data.data?.target;
   const participant = data.data?.participant;
   const ticket = data.data?.ticket;
 
-  if (!order?.id) {
-    showResult('error', 'Data order dari server tidak lengkap. Scan ulang tiket.');
+  if (!target?.id || !target.type) {
+    showResult('error', 'Data target dari server tidak lengkap. Scan ulang tiket.');
     playBeep('error');
     return;
   }
@@ -1118,8 +1160,8 @@ function showVerification(data: ScanResult) {
       <div class="modal-body">
         <div class="info-grid">
           <div class="info-item">
-            <span class="info-label">Order</span>
-            <span class="info-value">${escapeHtml(order.number || order.id)}</span>
+            <span class="info-label">${target.type === 'order' ? 'Order' : 'Sumber'}</span>
+            <span class="info-value">${escapeHtml(target.type === 'order' ? (order?.number || target.id) : 'VIP')}</span>
           </div>
           <div class="info-item">
             <span class="info-label">Nama</span>
@@ -1147,7 +1189,7 @@ function showVerification(data: ScanResult) {
   `;
 
   document.body.appendChild(modal);
-  activeVerification = { modal, orderId: order.id, confirming: false };
+  activeVerification = { modal, target: { type: target.type, id: target.id }, confirming: false };
   setScannerControlsDisabled(true);
   updateStatusIndicator();
 
@@ -1164,13 +1206,10 @@ function showVerification(data: ScanResult) {
     if (cancelButton) cancelButton.disabled = true;
 
     modal.remove();
-    await confirmPickup(activeVerification.orderId, data);
+    await confirmPickup(activeVerification.target, data);
   });
 
-  modal.querySelector<HTMLButtonElement>('#cancelPickup')?.addEventListener('click', () => {
-    clearVerification();
-    focusInput();
-  });
+  modal.querySelector<HTMLButtonElement>('#cancelPickup')?.addEventListener('click', () => void cancelPickup());
 }
 
 function clearVerification() {
@@ -1181,7 +1220,7 @@ function clearVerification() {
   resumeCameraIfSafe();
 }
 
-async function confirmPickup(orderId: string, validatedData: ScanResult) {
+async function confirmPickup(target: ScanTarget, validatedData: ScanResult) {
   isProcessing = true;
   updateStatusIndicator();
   if (inputMode === 'camera') setCameraFeedback(loadingFeedback('Mengonfirmasi pickup...'));
@@ -1189,14 +1228,14 @@ async function confirmPickup(orderId: string, validatedData: ScanResult) {
 
   try {
     const token = await ensureCSRFToken();
-    const response = await fetch(`${API_BASE}/api/orders/${orderId}/pickup`, {
+    const response = await fetch(`${API_BASE}/api/race-pack/targets/${target.type}/${target.id}/pickup`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         'X-CSRF-Token': token,
       },
-      body: '{}',
+      body: JSON.stringify({ station }),
     });
     if (response.status >= 500) {
       setConnectionStatus('database_not_ready');
@@ -1247,6 +1286,46 @@ async function confirmPickup(orderId: string, validatedData: ScanResult) {
     clearVerification();
     updateStatusIndicator();
     focusInput();
+  }
+}
+
+async function cancelPickup() {
+  if (!activeVerification || activeVerification.confirming) return;
+  const state = activeVerification;
+  state.confirming = true;
+  const confirmButton = state.modal.querySelector<HTMLButtonElement>('#confirmPickup');
+  const cancelButton = state.modal.querySelector<HTMLButtonElement>('#cancelPickup');
+  if (confirmButton) confirmButton.disabled = true;
+  if (cancelButton) {
+    cancelButton.disabled = true;
+    cancelButton.textContent = 'Mencatat...';
+  }
+  try {
+    const token = await ensureCSRFToken();
+    const response = await fetch(`${API_BASE}/api/race-pack/targets/${state.target.type}/${state.target.id}/cancel`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
+      body: JSON.stringify({ station }),
+    });
+    const data: ScanResult = await response.json();
+    if (!response.ok) throw new Error(data.message || 'Pembatalan belum tercatat');
+    clearVerification();
+    showResult('success', data.message);
+  } catch (caught) {
+    state.confirming = false;
+    if (confirmButton) confirmButton.disabled = false;
+    if (cancelButton) {
+      cancelButton.disabled = false;
+      cancelButton.textContent = 'Coba Batal Lagi';
+    }
+    let error = state.modal.querySelector<HTMLElement>('.cancel-error');
+    if (!error) {
+      error = document.createElement('p');
+      error.className = 'cancel-error';
+      state.modal.querySelector('.modal-actions')?.before(error);
+    }
+    error.textContent = caught instanceof Error ? caught.message : 'Pembatalan belum tercatat';
   }
 }
 

@@ -1,13 +1,14 @@
-WITH filtered_pickups AS (
+WITH pickups AS (
     SELECT
-        o.id,
-        o.number,
-        o.status,
-        o.race_pack_picked_up_at,
+        'order'::text AS target_type,
+        o.id AS target_id,
+        o.number AS order_number,
+        o.status AS order_status,
+        o.race_pack_picked_up_at AS picked_up_at,
         p.participant_name,
         p.bib_name,
         p.bib_number,
-        p.ukuran_jersey,
+        p.ukuran_jersey AS jersey_size,
         COALESCE(tparent.name, t.name) AS ticket_category,
         picked_by.name AS picked_up_by_name
     FROM orders AS o
@@ -26,23 +27,44 @@ WITH filtered_pickups AS (
     LEFT JOIN users AS picked_by ON picked_by.id = o.race_pack_picked_up_by
     WHERE o.deleted_at IS NULL
       AND o.race_pack_picked_up_at IS NOT NULL
-      AND ($1::text = '' OR o.number ILIKE $1 ESCAPE '\' OR p.participant_name ILIKE $1 ESCAPE '\' OR p.bib_name ILIKE $1 ESCAPE '\' OR p.bib_number ILIKE $1 ESCAPE '\')
-      AND ($2::text = '' OR lower(COALESCE(tparent.name, t.name)) = lower($2::text))
-      AND ($3::timestamp IS NULL OR o.race_pack_picked_up_at >= $3::timestamp)
-      AND ($4::timestamp IS NULL OR o.race_pack_picked_up_at < $4::timestamp)
-      AND ($5::timestamp IS NULL OR (o.race_pack_picked_up_at, o.id) < ($5::timestamp, $6::text))
+
+    UNION ALL
+
+    SELECT
+        'external_participant'::text AS target_type,
+        ep.id AS target_id,
+        NULL::varchar AS order_number,
+        NULL::varchar AS order_status,
+        ep.race_pack_picked_up_at AS picked_up_at,
+        ep.name AS participant_name,
+        ep.bib_name,
+        ep.bib_number,
+        NULL::varchar AS jersey_size,
+        t.name AS ticket_category,
+        picked_by.name AS picked_up_by_name
+    FROM external_participants AS ep
+    LEFT JOIN tickets AS t ON t.id = ep.category_ticket_id
+    LEFT JOIN users AS picked_by ON picked_by.id = ep.race_pack_picked_up_by
+    WHERE ep.deleted_at IS NULL
+      AND ep.race_pack_picked_up_at IS NOT NULL
 )
 SELECT
-    id,
-    number,
-    status,
-    race_pack_picked_up_at,
+    target_type,
+    target_id,
+    order_number,
+    order_status,
+    picked_up_at,
     participant_name,
     bib_name,
     bib_number,
-    ukuran_jersey,
+    jersey_size,
     ticket_category,
     picked_up_by_name
-FROM filtered_pickups
-ORDER BY race_pack_picked_up_at DESC, id DESC
-LIMIT $7;
+FROM pickups
+WHERE ($1::text = '' OR order_number ILIKE $1 ESCAPE '\' OR participant_name ILIKE $1 ESCAPE '\' OR bib_name ILIKE $1 ESCAPE '\' OR bib_number ILIKE $1 ESCAPE '\')
+  AND ($2::text = '' OR lower(ticket_category) = lower($2::text))
+  AND ($3::timestamp IS NULL OR picked_up_at >= $3::timestamp)
+  AND ($4::timestamp IS NULL OR picked_up_at < $4::timestamp)
+  AND ($5::timestamp IS NULL OR (picked_up_at, target_type, target_id) < ($5::timestamp, $6::text, $7::text))
+ORDER BY picked_up_at DESC, target_type DESC, target_id DESC
+LIMIT $8;

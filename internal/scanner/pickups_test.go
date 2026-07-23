@@ -16,8 +16,8 @@ func TestSearchPatternEscapesWildcards(t *testing.T) {
 
 func TestPickupListCursorRoundTrip(t *testing.T) {
 	pickedUpAt := time.Date(2026, 7, 23, 10, 15, 30, 123, time.UTC)
-	encoded := encodePickupListCursor(pickedUpAt, "01J00000000000000000001004")
-	decodedTime, decodedID, err := decodePickupListCursor(encoded)
+	encoded := encodePickupListCursor(pickedUpAt, TargetOrder, "01J00000000000000000001004")
+	decodedTime, decodedType, decodedID, err := decodePickupListCursor(encoded)
 	if err != nil {
 		t.Fatalf("decode cursor: %v", err)
 	}
@@ -27,10 +27,13 @@ func TestPickupListCursorRoundTrip(t *testing.T) {
 	if decodedID != "01J00000000000000000001004" {
 		t.Fatalf("decoded id = %q", decodedID)
 	}
+	if decodedType != TargetOrder {
+		t.Fatalf("decoded type = %q", decodedType)
+	}
 }
 
 func TestPickupListCursorRejectsInvalid(t *testing.T) {
-	if _, _, err := decodePickupListCursor("not-base64"); err == nil {
+	if _, _, _, err := decodePickupListCursor("not-base64"); err == nil {
 		t.Fatal("expected invalid cursor error")
 	}
 }
@@ -52,5 +55,16 @@ func TestListPickupsRejectsInvalidQueryBeforeRepository(t *testing.T) {
 	_, err = service.ListPickups(t.Context(), PickupListQuery{PickedUpFrom: &from, PickedUpTo: &to})
 	if err != ErrInvalidPickupListQuery {
 		t.Fatalf("range err = %v, want ErrInvalidPickupListQuery", err)
+	}
+}
+
+func TestVIPOrderSuffixRejectedBeforeRepository(t *testing.T) {
+	service := NewService(nil, nil)
+	result, err := service.ValidateManualLookup(t.Context(), "vip", "order_suffix", "GOG", "1")
+	if err != nil {
+		t.Fatalf("ValidateManualLookup error = %v", err)
+	}
+	if result.Outcome != OutcomeInvalidPayload {
+		t.Fatalf("outcome = %s, want invalid_payload", result.Outcome)
 	}
 }

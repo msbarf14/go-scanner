@@ -1,4 +1,5 @@
 export type ManualLookupType = 'ticket' | 'order_suffix' | 'bib_number';
+export type ManualLookupSource = 'online' | 'vip';
 
 const maxManualLookupLength = 32;
 
@@ -15,4 +16,12 @@ export function normalizeManualLookup(type: ManualLookupType, payload: string): 
   }
 
   return value;
+}
+
+export function lookupTypeForSource(source: ManualLookupSource, type: ManualLookupType): ManualLookupType {
+  return source === 'vip' && type === 'order_suffix' ? 'bib_number' : type;
+}
+
+export function lookupTypeAllowed(source: ManualLookupSource, type: ManualLookupType): boolean {
+  return !(source === 'vip' && type === 'order_suffix');
 }

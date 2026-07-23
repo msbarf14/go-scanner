@@ -100,6 +100,14 @@ func redactedLogPath(path string) string {
 	if strings.HasPrefix(path, "/api/orders/") && strings.HasSuffix(path, "/pickup") {
 		return "/api/orders/:order_ulid/pickup"
 	}
+	if strings.HasPrefix(path, "/api/race-pack/targets/") {
+		if strings.HasSuffix(path, "/pickup") {
+			return "/api/race-pack/targets/:target_type/:target_ulid/pickup"
+		}
+		if strings.HasSuffix(path, "/cancel") {
+			return "/api/race-pack/targets/:target_type/:target_ulid/cancel"
+		}
+	}
 	return path
 }
 

@@ -30,6 +30,10 @@ interface PickupListData {
 }
 
 interface PickupItem {
+  target: {
+    type: 'order' | 'external_participant';
+    id: string;
+  };
   order: {
     id: string;
     number?: string;
@@ -250,10 +254,11 @@ function renderContent(): string {
 }
 
 function renderTableRow(item: PickupItem): string {
+  const source = item.target.type === 'external_participant' ? 'VIP' : 'Online';
   return `
     <tr>
       <td><div class="value-primary">${escapeHtml(formatDateTime(item.order.picked_up_at))}</div></td>
-      <td><div class="value-primary">${escapeHtml(item.order.number || '-')}</div><div class="value-secondary">${escapeHtml(item.order.status || '-')}</div></td>
+      <td><div class="value-primary">${escapeHtml(item.order.number || source)}</div><div class="value-secondary">${escapeHtml(item.order.status || source)}</div></td>
       <td><div class="value-primary">${escapeHtml(item.participant.bib_number || '-')}</div><div class="value-secondary">${escapeHtml(item.participant.bib_name || '-')}</div></td>
       <td><div class="value-primary">${escapeHtml(item.participant.name || '-')}</div></td>
       <td>${escapeHtml(item.ticket.category || '-')}</td>
@@ -264,14 +269,15 @@ function renderTableRow(item: PickupItem): string {
 }
 
 function renderMobileCard(item: PickupItem): string {
+  const source = item.target.type === 'external_participant' ? 'VIP' : 'Online';
   return `
     <article class="pickup-card">
       <div class="pickup-card-header">
         <div>
-          <div class="value-primary">${escapeHtml(item.order.number || '-')}</div>
+          <div class="value-primary">${escapeHtml(item.order.number || source)}</div>
           <div class="value-secondary">${escapeHtml(formatDateTime(item.order.picked_up_at))}</div>
         </div>
-        <span class="status-pill">${escapeHtml(item.order.status || '-')}</span>
+        <span class="status-pill">${escapeHtml(item.order.status || source)}</span>
       </div>
       <div class="pickup-card-grid">
         ${renderMobileField('BIB', item.participant.bib_number || '-')}
@@ -590,17 +596,18 @@ function rfc3339ToLocalDateTime(value: string | null): string {
 
 function mergeFirstPage(incoming: PickupItem[]) {
   const byID = new Map<string, PickupItem>();
-  for (const item of incoming) byID.set(item.order.id, item);
+  for (const item of incoming) byID.set(`${item.target.type}:${item.target.id}`, item);
   for (const item of items) {
-    if (!byID.has(item.order.id)) byID.set(item.order.id, item);
+    const key = `${item.target.type}:${item.target.id}`;
+    if (!byID.has(key)) byID.set(key, item);
   }
   items = Array.from(byID.values()).sort(comparePickupItems);
 }
 
 function appendItems(incoming: PickupItem[]) {
-  const seen = new Set(items.map((item) => item.order.id));
+  const seen = new Set(items.map((item) => `${item.target.type}:${item.target.id}`));
   for (const item of incoming) {
-    if (!seen.has(item.order.id)) items.push(item);
+    if (!seen.has(`${item.target.type}:${item.target.id}`)) items.push(item);
   }
   items.sort(comparePickupItems);
 }
@@ -608,7 +615,8 @@ function appendItems(incoming: PickupItem[]) {
 function comparePickupItems(a: PickupItem, b: PickupItem): number {
   const timeDiff = new Date(b.order.picked_up_at).getTime() - new Date(a.order.picked_up_at).getTime();
   if (timeDiff !== 0) return timeDiff;
-  return b.order.id.localeCompare(a.order.id);
+  const typeDiff = b.target.type.localeCompare(a.target.type);
+  return typeDiff || b.target.id.localeCompare(a.target.id);
 }
 
 function clearSensitiveData() {

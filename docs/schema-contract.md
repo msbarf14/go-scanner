@@ -1,6 +1,6 @@
 # Schema Contract
 
-Dokumen ini mengunci kontrak minimum antara Go scanner dan database PostgreSQL existing Laravel Fenturun 2026. Scanner tidak membuat migration dan tidak mengelola data selain status pickup pada tabel `orders`.
+Dokumen ini mengunci kontrak minimum antara Go scanner dan database PostgreSQL existing Laravel Fenturun 2026. Scanner tidak membuat migration. Scanner mengelola status pickup pada `orders` dan `external_participants`, serta menulis audit ke `race_pack_scan_logs`.
 
 ## Sumber Kontrak
 
@@ -86,9 +86,9 @@ Aturan mutasi:
 
 Aturan read-only daftar pickup:
 
-- `GET /api/race-pack-pickups` hanya membaca order non-deleted dengan `race_pack_picked_up_at IS NOT NULL`.
+- `GET /api/race-pack-pickups` menggabungkan order dan external participant non-deleted dengan `race_pack_picked_up_at IS NOT NULL`.
 - Daftar pickup menampilkan status akhir database, bukan audit scan dan bukan data station.
-- Cursor pagination memakai urutan `race_pack_picked_up_at DESC, orders.id DESC`.
+- Cursor pagination memakai urutan `race_pack_picked_up_at DESC, target_type DESC, target_id DESC`.
 - Operator ditampilkan dari `users.name` melalui `race_pack_picked_up_by`; ULID operator tidak perlu ditampilkan pada UI.
 
 ## Tabel `participants`
@@ -123,6 +123,18 @@ Scanner wajib menghitung jumlah participant per order pada setiap validasi dan p
 | 0 | `participant_missing` |
 | 1 | lanjut validasi |
 | >1 | `multiple_participants` |
+
+## Tabel `external_participants`
+
+Scanner membaca `id`, `category_ticket_id`, `name`, `bib_name`, `bib_number`, `bib_number_normalized`, status pickup, dan `deleted_at`. Lookup BIB VIP menggunakan exact match terhadap nilai yang sudah dinormalisasi dengan `uppercase(trim(value))`.
+
+Scanner hanya menulis `race_pack_picked_up_at`, `race_pack_picked_up_by`, dan `updated_at`. Peserta eksternal tidak memiliki validasi status pembayaran atau jumlah participant order.
+
+## Tabel `race_pack_scan_logs`
+
+Setiap konfirmasi, penolakan duplikat, dan pembatalan Race Pack menulis satu row dengan ULID yang dibuat service. Nilai `result` dibatasi ke `handed_over`, `duplicate_rejected`, dan `cancelled`.
+
+Tepat satu dari `order_id` atau `external_participant_id` wajib terisi. Update status pickup dan log `handed_over` dilakukan dalam transaksi row-lock yang sama.
 
 ## Tabel `tickets`
 

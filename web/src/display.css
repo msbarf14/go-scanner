@@ -262,11 +262,65 @@ svg {
   overflow-wrap: anywhere;
 }
 
-.idle-content {
+.idle-content,
+.fallback-content {
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
+}
+
+.fallback-content {
+  width: min(52rem, 100%);
+  padding: clamp(1rem, 3vh, 2rem);
+  border-radius: clamp(1rem, 3vh, 2rem);
+  background: rgba(127, 29, 29, 0.72);
+  box-shadow: 0 2rem 5rem rgba(0, 0, 0, 0.28);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+}
+
+.fallback-not_found {
+  background: rgba(146, 64, 14, 0.78);
+}
+
+.fallback-error {
+  background: rgba(127, 29, 29, 0.78);
+}
+
+.fallback-icon-wrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(4.5rem, 12vh, 7rem);
+  height: clamp(4.5rem, 12vh, 7rem);
+  margin-bottom: clamp(0.75rem, 2vh, 1.5rem);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.fallback-icon {
+  width: 55%;
+  height: 55%;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.fallback-title {
+  color: #fff;
+  font-size: clamp(2.25rem, min(8vw, 10vh), 5.5rem);
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  line-height: 0.95;
+}
+
+.fallback-message {
+  max-width: 42rem;
+  margin-top: clamp(0.75rem, 2vh, 1.25rem);
+  color: rgba(255, 255, 255, 0.88);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: clamp(1rem, min(2.5vw, 3.5vh), 1.75rem);
+  font-weight: 700;
+  line-height: 1.25;
 }
 
 .qr-icon-wrapper {

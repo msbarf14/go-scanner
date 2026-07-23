@@ -196,11 +196,14 @@ GET  /race-pack-pickups        Monitoring pickup race pack
 GET  /api/display              Data display per station
 GET  /api/race-pack-pickups    Daftar pickup race pack
 POST /api/scans/validate       Validasi tiket
+POST /api/race-pack/scans/validate Validasi Race Pack terautentikasi
 GET  /auth/session             Status session scanner
 GET  /auth/csrf                Token CSRF
 POST /auth/login               Login operator Race Pack
 POST /auth/logout              Logout scanner
 POST /api/orders/{ulid}/pickup Konfirmasi pickup
+POST /api/race-pack/targets/{type}/{ulid}/pickup Konfirmasi pickup order/VIP
+POST /api/race-pack/targets/{type}/{ulid}/cancel Catat pembatalan order/VIP
 GET  /healthz                  Process health
 GET  /readyz                   Database readiness
 ```

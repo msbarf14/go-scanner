@@ -1,6 +1,9 @@
 package scanner
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseOrderULID(t *testing.T) {
 	tests := []struct {
@@ -123,6 +126,38 @@ func TestParseOrderULID(t *testing.T) {
 	}
 }
 
+func TestParseScanTarget(t *testing.T) {
+	orderID := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	externalID := "01BX5ZZKBKACTAV9WEVGEMMVRZ"
+	tests := []struct {
+		input string
+		want  ScanTarget
+		valid bool
+	}{
+		{"https://event.test/ticket/" + orderID + "/ticket.pdf?download=true", ScanTarget{TargetOrder, orderID}, true},
+		{"/ticket/" + orderID, ScanTarget{TargetOrder, orderID}, true},
+		{"/ticket/" + orderID + "/2/ticket.pdf", ScanTarget{TargetOrder, orderID}, true},
+		{strings.ToLower(orderID), ScanTarget{TargetOrder, orderID}, true},
+		{"https://event.test/external-participants/" + externalID + "/ticket.pdf", ScanTarget{TargetExternalParticipant, externalID}, true},
+		{"external:" + strings.ToLower(externalID), ScanTarget{TargetExternalParticipant, externalID}, true},
+		{"external:not-a-ulid", ScanTarget{}, false},
+		{"/external-participants/" + externalID, ScanTarget{}, false},
+		{"/ticket/" + orderID + "/ticket.pdf/extra", ScanTarget{}, false},
+		{"scan /ticket/" + orderID + "/ticket.pdf now", ScanTarget{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, outcome := ParseScanTarget(tt.input)
+			if tt.valid && (outcome != OutcomeValid || got != tt.want) {
+				t.Fatalf("ParseScanTarget() = %#v, %s; want %#v, valid", got, outcome, tt.want)
+			}
+			if !tt.valid && outcome != OutcomeInvalidPayload {
+				t.Fatalf("outcome = %s, want invalid_payload", outcome)
+			}
+		})
+	}
+}
+
 func TestParseManualLookup(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -187,5 +222,17 @@ func TestNormalizeStation(t *testing.T) {
 				t.Fatalf("station = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseManualSource(t *testing.T) {
+	if source, ok := ParseManualSource(""); !ok || source != ManualSourceOnline {
+		t.Fatalf("empty source = %q, %v", source, ok)
+	}
+	if source, ok := ParseManualSource(" VIP "); !ok || source != ManualSourceVIP {
+		t.Fatalf("VIP source = %q, %v", source, ok)
+	}
+	if _, ok := ParseManualSource("all"); ok {
+		t.Fatal("unknown source must be rejected")
 	}
 }

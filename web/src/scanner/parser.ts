@@ -1,27 +1,44 @@
 const maxPayloadLength = 512;
-const validULID = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
+const ulidPart = '[0-9A-HJ-NP-Za-hj-np-z]{26}';
+const rawULID = new RegExp(`^(${ulidPart})$`, 'i');
+const externalToken = new RegExp(`^external:(${ulidPart})$`, 'i');
+const orderPath = new RegExp(`^/ticket/(${ulidPart})(?:/ticket\\.pdf|/[0-9]+/ticket\\.pdf)?/?$`, 'i');
+const externalPath = new RegExp(`^/external-participants/(${ulidPart})/ticket\\.pdf/?$`, 'i');
 
-export function extractOrderId(input: string): string | null {
+export type ScanTargetType = 'order' | 'external_participant';
+export interface ScanTarget { type: ScanTargetType; id: string }
+
+export function extractScanTarget(input: string): ScanTarget | null {
   const payload = input.trim();
-  if (payload.length === 0 || payload.length > maxPayloadLength) return null;
+  if (payload.length === 0 || payload.length > maxPayloadLength || /\s/.test(payload)) return null;
 
-  if (validULID.test(payload)) return payload.toUpperCase();
+  let match = externalToken.exec(payload);
+  if (match) return { type: 'external_participant', id: match[1].toUpperCase() };
+  match = rawULID.exec(payload);
+  if (match) return { type: 'order', id: match[1].toUpperCase() };
 
-  const path = payload.startsWith('http://') || payload.startsWith('https://')
-    ? pathFromURL(payload)
-    : payload;
+  const path = pathFromInput(payload);
   if (!path) return null;
-
-  const normalizedPath = path.replace(/^\/+/, '');
-  if (!normalizedPath.startsWith('ticket/')) return null;
-
-  const ulid = normalizedPath.slice('ticket/'.length).split('/')[0];
-  return validULID.test(ulid) ? ulid.toUpperCase() : null;
+  match = externalPath.exec(path);
+  if (match) return { type: 'external_participant', id: match[1].toUpperCase() };
+  match = orderPath.exec(path);
+  if (match) return { type: 'order', id: match[1].toUpperCase() };
+  return null;
 }
 
-function pathFromURL(value: string): string | null {
+export function extractOrderId(input: string): string | null {
+  const target = extractScanTarget(input);
+  return target?.type === 'order' ? target.id : null;
+}
+
+function pathFromInput(value: string): string | null {
   try {
-    return new URL(value).pathname;
+    if (value.startsWith('/')) return new URL(value, 'https://scanner.invalid').pathname;
+    if (value.startsWith('ticket/') || value.startsWith('external-participants/')) {
+      return new URL(value, 'https://scanner.invalid').pathname;
+    }
+    const parsed = new URL(value);
+    return parsed.hostname ? parsed.pathname : null;
   } catch {
     return null;
   }

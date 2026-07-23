@@ -5,24 +5,25 @@ import "net/http"
 type Outcome string
 
 const (
-	OutcomeValid              Outcome = "valid"
-	OutcomePickedUp           Outcome = "picked_up"
-	OutcomeInvalidPayload     Outcome = "invalid_payload"
-	OutcomeNotFound           Outcome = "not_found"
-	OutcomeNotPaid            Outcome = "not_paid"
-	OutcomeParticipantMissing Outcome = "participant_missing"
+	OutcomeValid                Outcome = "valid"
+	OutcomePickedUp             Outcome = "picked_up"
+	OutcomeCancelled            Outcome = "cancelled"
+	OutcomeInvalidPayload       Outcome = "invalid_payload"
+	OutcomeNotFound             Outcome = "not_found"
+	OutcomeNotPaid              Outcome = "not_paid"
+	OutcomeParticipantMissing   Outcome = "participant_missing"
 	OutcomeMultipleParticipants Outcome = "multiple_participants"
-	OutcomeAlreadyPickedUp    Outcome = "already_picked_up"
-	OutcomeAmbiguousLookup    Outcome = "ambiguous_lookup"
-	OutcomeUnauthenticated    Outcome = "unauthenticated"
-	OutcomeForbidden          Outcome = "forbidden"
-	OutcomeDatabaseUnavailable Outcome = "database_unavailable"
-	OutcomeInternalError      Outcome = "internal_error"
+	OutcomeAlreadyPickedUp      Outcome = "already_picked_up"
+	OutcomeAmbiguousLookup      Outcome = "ambiguous_lookup"
+	OutcomeUnauthenticated      Outcome = "unauthenticated"
+	OutcomeForbidden            Outcome = "forbidden"
+	OutcomeDatabaseUnavailable  Outcome = "database_unavailable"
+	OutcomeInternalError        Outcome = "internal_error"
 )
 
 func (o Outcome) HTTPStatus() int {
 	switch o {
-	case OutcomeValid, OutcomePickedUp:
+	case OutcomeValid, OutcomePickedUp, OutcomeCancelled:
 		return http.StatusOK
 	case OutcomeInvalidPayload:
 		return http.StatusUnprocessableEntity
@@ -47,10 +48,12 @@ func (o Outcome) Message() string {
 		return "Tiket valid"
 	case OutcomePickedUp:
 		return "Race pack berhasil diserahkan"
+	case OutcomeCancelled:
+		return "Penyerahan race pack dibatalkan"
 	case OutcomeInvalidPayload:
 		return "QR tiket tidak valid"
 	case OutcomeNotFound:
-		return "Order tidak ditemukan"
+		return "Peserta atau order tidak ditemukan"
 	case OutcomeNotPaid:
 		return "Tiket belum valid untuk pengambilan"
 	case OutcomeParticipantMissing:

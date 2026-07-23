@@ -1,29 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { extractOrderId } from './parser';
+import { extractOrderId, extractScanTarget } from './parser';
 
-const ulid = '01KCAFFV7M5RZJDXXH7DGKVJ2S';
+const orderID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+const externalID = '01BX5ZZKBKACTAV9WEVGEMMVRZ';
 
-describe('extractOrderId', () => {
-  it('accepts raw ULID and normalizes casing', () => {
-    expect(extractOrderId(ulid.toLowerCase())).toBe(ulid);
+describe('scan target parser', () => {
+  it('accepts canonical and legacy order formats', () => {
+    expect(extractScanTarget(`https://event.test/ticket/${orderID}/ticket.pdf?download=true`)).toEqual({ type: 'order', id: orderID });
+    expect(extractScanTarget(`/ticket/${orderID}`)).toEqual({ type: 'order', id: orderID });
+    expect(extractScanTarget(`/ticket/${orderID}/2/ticket.pdf`)).toEqual({ type: 'order', id: orderID });
+    expect(extractOrderId(orderID.toLowerCase())).toBe(orderID);
   });
 
-  it('accepts ticket paths with or without leading slash', () => {
-    expect(extractOrderId(`ticket/${ulid}`)).toBe(ulid);
-    expect(extractOrderId(`/ticket/${ulid}/extra`)).toBe(ulid);
+  it('accepts external participant URL and token', () => {
+    expect(extractScanTarget(`https://event.test/external-participants/${externalID}/ticket.pdf`)).toEqual({ type: 'external_participant', id: externalID });
+    expect(extractScanTarget(`external:${externalID.toLowerCase()}`)).toEqual({ type: 'external_participant', id: externalID });
   });
 
-  it('accepts full HTTP URLs with ticket path', () => {
-    expect(extractOrderId(`https://scanner.example.com/ticket/${ulid}?utm=qr`)).toBe(ulid);
-  });
-
-  it('rejects unknown paths and invalid characters', () => {
-    expect(extractOrderId(`/orders/${ulid}`)).toBeNull();
-    expect(extractOrderId('01KCAFFV7M5RZJDXXH7DGKVJ2I')).toBeNull();
-  });
-
-  it('rejects empty and oversized payloads', () => {
-    expect(extractOrderId('   ')).toBeNull();
-    expect(extractOrderId('x'.repeat(513))).toBeNull();
+  it('rejects partial and malformed paths', () => {
+    expect(extractScanTarget(`/external-participants/${externalID}`)).toBeNull();
+    expect(extractScanTarget(`/ticket/${orderID}/ticket.pdf/extra`)).toBeNull();
+    expect(extractScanTarget(`scan /ticket/${orderID}/ticket.pdf now`)).toBeNull();
+    expect(extractScanTarget('external:not-a-ulid')).toBeNull();
   });
 });

@@ -2,63 +2,83 @@ package scanner
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 )
 
 const (
-	ulidLength = 26
-	maxPayloadLength = 512
+	ulidLength            = 26
+	maxPayloadLength      = 512
 	maxManualLookupLength = 32
 )
 
-type ManualLookupType string
+type TargetType string
 
 const (
-	ManualLookupOrderSuffix ManualLookupType = "order_suffix"
-	ManualLookupBIBNumber    ManualLookupType = "bib_number"
+	TargetOrder               TargetType = "order"
+	TargetExternalParticipant TargetType = "external_participant"
 )
 
-var validULIDChars = map[byte]bool{
-	'0': true, '1': true, '2': true, '3': true, '4': true,
-	'5': true, '6': true, '7': true, '8': true, '9': true,
-	'A': true, 'B': true, 'C': true, 'D': true, 'E': true,
-	'F': true, 'G': true, 'H': true, 'J': true, 'K': true,
-	'M': true, 'N': true, 'P': true, 'Q': true, 'R': true,
-	'S': true, 'T': true, 'V': true, 'W': true, 'X': true,
-	'Y': true, 'Z': true,
+type ScanTarget struct {
+	Type TargetType `json:"type"`
+	ID   string     `json:"id"`
+}
+
+type ManualLookupType string
+type ManualLookupSource string
+
+const (
+	ManualLookupOrderSuffix ManualLookupType   = "order_suffix"
+	ManualLookupBIBNumber   ManualLookupType   = "bib_number"
+	ManualSourceOnline      ManualLookupSource = "online"
+	ManualSourceVIP         ManualLookupSource = "vip"
+)
+
+var (
+	ulidPattern          = `[0-9A-HJ-NP-Za-hj-np-z]{26}`
+	rawULIDPattern       = regexp.MustCompile(`^(` + ulidPattern + `)$`)
+	externalTokenPattern = regexp.MustCompile(`(?i)^external:(` + ulidPattern + `)$`)
+	externalPathPattern  = regexp.MustCompile(`(?i)^/external-participants/(` + ulidPattern + `)/ticket\.pdf/?$`)
+	orderPathPattern     = regexp.MustCompile(`(?i)^/ticket/(` + ulidPattern + `)(?:/ticket\.pdf|/[0-9]+/ticket\.pdf)?/?$`)
+)
+
+func ParseScanTarget(payload string) (ScanTarget, Outcome) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || len(payload) > maxPayloadLength {
+		return ScanTarget{}, OutcomeInvalidPayload
+	}
+
+	if match := externalTokenPattern.FindStringSubmatch(payload); match != nil {
+		return ScanTarget{Type: TargetExternalParticipant, ID: strings.ToUpper(match[1])}, OutcomeValid
+	}
+	if match := rawULIDPattern.FindStringSubmatch(payload); match != nil {
+		return ScanTarget{Type: TargetOrder, ID: strings.ToUpper(match[1])}, OutcomeValid
+	}
+
+	path, ok := scanPath(payload)
+	if !ok {
+		return ScanTarget{}, OutcomeInvalidPayload
+	}
+	if match := externalPathPattern.FindStringSubmatch(path); match != nil {
+		return ScanTarget{Type: TargetExternalParticipant, ID: strings.ToUpper(match[1])}, OutcomeValid
+	}
+	if match := orderPathPattern.FindStringSubmatch(path); match != nil {
+		return ScanTarget{Type: TargetOrder, ID: strings.ToUpper(match[1])}, OutcomeValid
+	}
+	return ScanTarget{}, OutcomeInvalidPayload
 }
 
 func ParseOrderULID(payload string) (string, Outcome) {
-	payload = strings.TrimSpace(payload)
-	
-	if len(payload) == 0 || len(payload) > maxPayloadLength {
+	target, outcome := ParseScanTarget(payload)
+	if outcome != OutcomeValid || target.Type != TargetOrder {
 		return "", OutcomeInvalidPayload
 	}
-
-	if ulid, ok := extractRawULID(payload); ok {
-		return ulid, OutcomeValid
-	}
-
-	if ulid, ok := extractFromURL(payload); ok {
-		return ulid, OutcomeValid
-	}
-
-	return "", OutcomeInvalidPayload
+	return target.ID, OutcomeValid
 }
 
-func extractRawULID(s string) (string, bool) {
-	if len(s) != ulidLength {
-		return "", false
-	}
-	
-	upper := strings.ToUpper(s)
-	for i := 0; i < ulidLength; i++ {
-		if !validULIDChars[upper[i]] {
-			return "", false
-		}
-	}
-	
-	return upper, true
+func ParseTargetType(value string) (TargetType, bool) {
+	targetType := TargetType(strings.TrimSpace(value))
+	return targetType, targetType == TargetOrder || targetType == TargetExternalParticipant
 }
 
 func ParseManualLookup(lookupType string, payload string) (ManualLookupType, string, Outcome) {
@@ -73,15 +93,20 @@ func ParseManualLookup(lookupType string, payload string) (ManualLookupType, str
 	return lookup, value, OutcomeValid
 }
 
+func ParseManualSource(value string) (ManualLookupSource, bool) {
+	source := ManualLookupSource(strings.ToLower(strings.TrimSpace(value)))
+	if source == "" {
+		source = ManualSourceOnline
+	}
+	return source, source == ManualSourceOnline || source == ManualSourceVIP
+}
+
 func validManualLookupValue(value string) bool {
 	if len(value) == 0 || len(value) > maxManualLookupLength {
 		return false
 	}
 	for _, char := range value {
-		if char >= 'A' && char <= 'Z' {
-			continue
-		}
-		if char >= '0' && char <= '9' {
+		if (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
 			continue
 		}
 		return false
@@ -89,47 +114,23 @@ func validManualLookupValue(value string) bool {
 	return true
 }
 
-func extractFromURL(s string) (string, bool) {
-	if !strings.Contains(s, "/") {
+func scanPath(value string) (string, bool) {
+	if strings.ContainsAny(value, "\r\n\t ") {
 		return "", false
 	}
-
-	var path string
-	
-	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-		u, err := url.Parse(s)
-		if err != nil {
+	if strings.HasPrefix(value, "/") {
+		u, err := url.Parse(value)
+		if err != nil || u.Host != "" || u.Scheme != "" {
 			return "", false
 		}
-		path = u.Path
-	} else {
-		path = s
+		return u.Path, true
 	}
-
-	path = strings.TrimPrefix(path, "/")
-	
-	if !strings.HasPrefix(path, "ticket/") {
+	if strings.HasPrefix(value, "ticket/") || strings.HasPrefix(value, "external-participants/") {
+		return "/" + value, true
+	}
+	u, err := url.Parse(value)
+	if err != nil || u.Path == "" || u.Host == "" {
 		return "", false
 	}
-	
-	path = strings.TrimPrefix(path, "ticket/")
-	
-	parts := strings.SplitN(path, "/", 2)
-	if len(parts) == 0 {
-		return "", false
-	}
-	
-	ulid := parts[0]
-	if len(ulid) != ulidLength {
-		return "", false
-	}
-	
-	upper := strings.ToUpper(ulid)
-	for i := 0; i < ulidLength; i++ {
-		if !validULIDChars[upper[i]] {
-			return "", false
-		}
-	}
-	
-	return upper, true
+	return u.Path, true
 }

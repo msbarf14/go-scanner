@@ -96,6 +96,23 @@ func TestPickupRequiresCSRF(t *testing.T) {
 	}
 }
 
+func TestGenericPickupAndCancelRequireCSRF(t *testing.T) {
+	handler := newTestRouter(t)
+	paths := []string{
+		"/api/race-pack/targets/order/01JXXXXXXXXXXXXXXXXXXXXXXX/pickup",
+		"/api/race-pack/targets/external_participant/01JXXXXXXXXXXXXXXXXXXXXXXX/cancel",
+	}
+	for _, path := range paths {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"station":1}`))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("%s status = %d, want %d", path, response.Code, http.StatusForbidden)
+		}
+	}
+}
+
 func TestManualValidateRequiresSession(t *testing.T) {
 	server := httptest.NewServer(newTestRouter(t))
 	defer server.Close()

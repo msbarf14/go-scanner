@@ -14,3 +14,11 @@ func TestRedactedLogPathMasksPickupOrderID(t *testing.T) {
 		t.Fatalf("non-pickup path = %q, want %q", got, unchanged)
 	}
 }
+
+func TestRedactedGenericTargetLogPath(t *testing.T) {
+	got := redactedLogPath("/api/race-pack/targets/external_participant/01KVPMC54R1RA026RA4ZYXJR0P/cancel")
+	want := "/api/race-pack/targets/:target_type/:target_ulid/cancel"
+	if got != want {
+		t.Fatalf("redacted path = %q, want %q", got, want)
+	}
+}

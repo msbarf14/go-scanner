@@ -98,3 +98,51 @@ CREATE TABLE participants (
 );
 
 CREATE INDEX participants_order_id_index ON participants (order_id);
+
+CREATE TABLE external_participants (
+    id char(26) PRIMARY KEY,
+    category_ticket_id char(26) NOT NULL REFERENCES tickets(id) ON DELETE RESTRICT,
+    name varchar(255) NOT NULL,
+    bib_name varchar(255) NULL,
+    bib_number varchar(255) NOT NULL,
+    bib_number_normalized varchar(255) NOT NULL,
+    race_pack_picked_up_at timestamp NULL,
+    race_pack_picked_up_by char(26) NULL REFERENCES users(id) ON DELETE SET NULL,
+    import_file_name varchar(255) NULL,
+    import_file_hash char(64) NULL,
+    import_row_number integer NULL CHECK (import_row_number >= 0),
+    imported_by char(26) NULL REFERENCES users(id) ON DELETE SET NULL,
+    imported_at timestamp NULL,
+    created_at timestamp NULL,
+    updated_at timestamp NULL,
+    deleted_at timestamp NULL,
+    UNIQUE (category_ticket_id, bib_number_normalized)
+);
+
+CREATE INDEX external_participants_bib_normalized_idx ON external_participants (bib_number_normalized);
+CREATE INDEX external_participants_picked_up_at_idx ON external_participants (race_pack_picked_up_at);
+CREATE INDEX external_participants_picked_up_by_idx ON external_participants (race_pack_picked_up_by);
+CREATE INDEX external_participants_imported_at_idx ON external_participants (imported_at);
+CREATE INDEX external_participants_import_file_hash_idx ON external_participants (import_file_hash);
+
+CREATE TABLE race_pack_scan_logs (
+    id char(26) PRIMARY KEY,
+    order_id char(26) NULL REFERENCES orders(id) ON DELETE CASCADE,
+    external_participant_id char(26) NULL REFERENCES external_participants(id) ON DELETE CASCADE,
+    scanned_by char(26) NULL REFERENCES users(id) ON DELETE SET NULL,
+    result varchar(32) NOT NULL CHECK (result IN ('handed_over', 'duplicate_rejected', 'cancelled')),
+    station integer NOT NULL CHECK (station >= 0),
+    created_at timestamp NULL,
+    updated_at timestamp NULL,
+    CONSTRAINT race_pack_scan_logs_exactly_one_target CHECK (
+        (order_id IS NOT NULL AND external_participant_id IS NULL)
+        OR (order_id IS NULL AND external_participant_id IS NOT NULL)
+    )
+);
+
+CREATE INDEX race_pack_scan_logs_order_idx ON race_pack_scan_logs (order_id);
+CREATE INDEX race_pack_scan_logs_external_participant_idx ON race_pack_scan_logs (external_participant_id);
+CREATE INDEX race_pack_scan_logs_created_at_idx ON race_pack_scan_logs (created_at);
+CREATE INDEX race_pack_scan_logs_result_created_at_idx ON race_pack_scan_logs (result, created_at);
+CREATE INDEX race_pack_scan_logs_station_created_at_idx ON race_pack_scan_logs (station, created_at);
+CREATE INDEX race_pack_scan_logs_scanned_by_created_at_idx ON race_pack_scan_logs (scanned_by, created_at);

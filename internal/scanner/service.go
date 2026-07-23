@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"fenturun2026-bib-scanner/internal/cache"
+	"github.com/jackc/pgx/v5"
+	"github.com/oklog/ulid/v2"
 )
 
 const (
-	maxDisplayCacheEntries = 128
-	defaultPickupListLimit = 50
-	maxPickupListLimit = 100
+	maxDisplayCacheEntries    = 128
+	defaultPickupListLimit    = 50
+	maxPickupListLimit        = 100
 	maxPickupListSearchLength = 100
 )
 
@@ -38,9 +40,18 @@ func NewService(repo *Repository, logger *slog.Logger) *Service {
 
 type ValidateResult struct {
 	Outcome     Outcome
+	Target      *TargetInfo
 	Order       *OrderInfo
 	Participant *ParticipantInfo
 	Ticket      *TicketInfo
+}
+
+type TargetInfo struct {
+	Type               TargetType `json:"type"`
+	ID                 string     `json:"id"`
+	Number             *string    `json:"number,omitempty"`
+	RacePackPickedUp   bool       `json:"race_pack_picked_up"`
+	RacePackPickedUpAt *string    `json:"race_pack_picked_up_at,omitempty"`
 }
 
 type OrderInfo struct {
@@ -63,7 +74,12 @@ type TicketInfo struct {
 }
 
 type DisplayData struct {
-	Order       *OrderInfo       `json:"order"`
+	Version     int              `json:"v"`
+	ScanID      string           `json:"scan_id"`
+	Type        TargetType       `json:"type"`
+	ID          string           `json:"id"`
+	Target      *TargetInfo      `json:"target"`
+	Order       *OrderInfo       `json:"order,omitempty"`
 	Participant *ParticipantInfo `json:"participant"`
 	Ticket      *TicketInfo      `json:"ticket"`
 	ScannedAt   string           `json:"scanned_at"`
@@ -90,9 +106,10 @@ type PickupListPage struct {
 }
 
 type PickupListItem struct {
+	Target      ScanTarget            `json:"target"`
 	Order       PickupListOrder       `json:"order"`
 	Participant PickupListParticipant `json:"participant"`
-	Ticket      PickupListTicket       `json:"ticket"`
+	Ticket      PickupListTicket      `json:"ticket"`
 	Operator    PickupListOperator    `json:"operator"`
 }
 
@@ -119,19 +136,27 @@ type PickupListOperator struct {
 }
 
 type pickupListCursor struct {
-	PickedUpAt string `json:"picked_up_at"`
-	OrderID    string `json:"order_id"`
+	PickedUpAt string     `json:"picked_up_at"`
+	TargetType TargetType `json:"target_type,omitempty"`
+	TargetID   string     `json:"target_id,omitempty"`
+	OrderID    string     `json:"order_id,omitempty"`
 }
 
-func (s *Service) ValidateManualLookup(ctx context.Context, lookupType string, payload string, station string) (*ValidateResult, error) {
+func (s *Service) ValidateManualLookup(ctx context.Context, sourceValue string, lookupType string, payload string, station string) (*ValidateResult, error) {
 	manualLookupType, value, outcome := ParseManualLookup(lookupType, payload)
 	if outcome != OutcomeValid {
 		return &ValidateResult{Outcome: outcome}, nil
 	}
 
-	resolution, err := s.repo.ResolveManualLookup(ctx, manualLookupType, value)
+	source, ok := ParseManualSource(sourceValue)
+	if !ok || (source == ManualSourceVIP && manualLookupType == ManualLookupOrderSuffix) {
+		return &ValidateResult{Outcome: OutcomeInvalidPayload}, nil
+	}
+	resolution, err := s.repo.ResolveManualLookup(ctx, source, manualLookupType, value)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "manual lookup failed", "error", err, "lookup_type", string(manualLookupType))
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "manual lookup failed", "error", err, "lookup_type", string(manualLookupType), "source", source)
+		}
 		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
 	if resolution.Count == 0 {
@@ -141,13 +166,19 @@ func (s *Service) ValidateManualLookup(ctx context.Context, lookupType string, p
 		return &ValidateResult{Outcome: OutcomeAmbiguousLookup}, nil
 	}
 
-	return s.Validate(ctx, resolution.OrderID, station)
+	return s.Validate(ctx, resolution.Target, station)
 }
 
-func (s *Service) Validate(ctx context.Context, orderID string, station string) (*ValidateResult, error) {
-	lookup, err := s.repo.LookupOrder(ctx, orderID)
+func (s *Service) Validate(ctx context.Context, target ScanTarget, station string) (*ValidateResult, error) {
+	if target.Type != TargetOrder && target.Type != TargetExternalParticipant {
+		return &ValidateResult{Outcome: OutcomeInvalidPayload}, nil
+	}
+	if target.Type == TargetExternalParticipant {
+		return s.validateExternal(ctx, target, station)
+	}
+	lookup, err := s.repo.LookupOrder(ctx, target.ID)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "lookup order failed", "error", err, "order_id_hash", hashID(orderID))
+		s.logError(ctx, "lookup order failed", err, target)
 		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
 
@@ -169,6 +200,7 @@ func (s *Service) Validate(ctx context.Context, orderID string, station string) 
 
 	result := &ValidateResult{
 		Outcome: OutcomeValid,
+		Target:  &TargetInfo{Type: target.Type, ID: lookup.ID, Number: lookup.Number, RacePackPickedUp: lookup.RacePackPickedUpAt != nil},
 		Order: &OrderInfo{
 			ID:               lookup.ID,
 			Number:           lookup.Number,
@@ -190,21 +222,71 @@ func (s *Service) Validate(ctx context.Context, orderID string, station string) 
 		pickedUpAt := lookup.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
 		result.Outcome = OutcomeAlreadyPickedUp
 		result.Order.RacePackPickedUpAt = &pickedUpAt
+		result.Target.RacePackPickedUpAt = &pickedUpAt
 	}
-
-	if station != "" {
-		displayData := &DisplayData{
-			Order:       result.Order,
-			Participant: result.Participant,
-			Ticket:      result.Ticket,
-			ScannedAt:   time.Now().Format(time.RFC3339Nano),
-		}
-		cacheKey := fmt.Sprintf("display:%s", station)
-		s.displayCache.Set(cacheKey, displayData, 2*time.Minute)
-		s.logger.InfoContext(ctx, "display data cached", "station", station, "order_id_hash", hashID(orderID))
-	}
-
+	s.publishDisplay(ctx, station, target, result)
 	return result, nil
+}
+
+func (s *Service) validateExternal(ctx context.Context, target ScanTarget, station string) (*ValidateResult, error) {
+	lookup, err := s.repo.LookupExternalParticipant(ctx, target.ID)
+	if err != nil {
+		s.logError(ctx, "lookup external participant failed", err, target)
+		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
+	}
+	if lookup == nil {
+		return &ValidateResult{Outcome: OutcomeNotFound}, nil
+	}
+	displayName := lookup.Name
+	if lookup.BibName != nil && strings.TrimSpace(*lookup.BibName) != "" {
+		displayName = lookup.BibName
+	}
+	result := &ValidateResult{
+		Outcome:     OutcomeValid,
+		Target:      &TargetInfo{Type: target.Type, ID: lookup.ID, RacePackPickedUp: lookup.RacePackPickedUpAt != nil},
+		Participant: &ParticipantInfo{Name: displayName, BibName: lookup.BibName, BIBNumber: lookup.BIBNumber},
+		Ticket:      &TicketInfo{Category: lookup.TicketCategory},
+	}
+	if lookup.RacePackPickedUpAt != nil {
+		pickedUpAt := lookup.RacePackPickedUpAt.Format(time.RFC3339)
+		result.Outcome = OutcomeAlreadyPickedUp
+		result.Target.RacePackPickedUpAt = &pickedUpAt
+	}
+	s.publishDisplay(ctx, station, target, result)
+	return result, nil
+}
+
+func (s *Service) ValidateRacePack(ctx context.Context, target ScanTarget, station string, stationNumber int, operatorID string) (*ValidateResult, error) {
+	result, err := s.Validate(ctx, target, station)
+	if err != nil || result.Outcome != OutcomeAlreadyPickedUp {
+		return result, err
+	}
+	if err := s.repo.RecordScanResult(ctx, target, operatorID, stationNumber, newULID(), "duplicate_rejected"); err != nil {
+		s.logError(ctx, "record duplicate scan failed", err, target)
+		s.displayCache.Delete(fmt.Sprintf("display:%s", station))
+		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
+	}
+	return result, nil
+}
+
+func (s *Service) RecordDuplicateScan(ctx context.Context, target ScanTarget, station string, stationNumber int, operatorID string) Outcome {
+	if err := s.repo.RecordScanResult(ctx, target, operatorID, stationNumber, newULID(), "duplicate_rejected"); err != nil {
+		s.logError(ctx, "record duplicate manual scan failed", err, target)
+		s.displayCache.Delete(fmt.Sprintf("display:%s", station))
+		return OutcomeDatabaseUnavailable
+	}
+	return OutcomeAlreadyPickedUp
+}
+
+func (s *Service) publishDisplay(ctx context.Context, station string, target ScanTarget, result *ValidateResult) {
+	if station == "" {
+		return
+	}
+	data := &DisplayData{Version: 3, ScanID: newULID(), Type: target.Type, ID: target.ID, Target: result.Target, Order: result.Order, Participant: result.Participant, Ticket: result.Ticket, ScannedAt: time.Now().Format(time.RFC3339Nano)}
+	s.displayCache.Set(fmt.Sprintf("display:%s", station), data, 2*time.Minute)
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "display data cached", "station", station, "target_type", target.Type, "target_id_hash", hashID(target.ID))
+	}
 }
 
 func (s *Service) GetDisplayData(station string) *DisplayData {
@@ -246,7 +328,7 @@ func (s *Service) ListPickups(ctx context.Context, query PickupListQuery) (*Pick
 		return nil, ErrInvalidPickupListQuery
 	}
 
-	cursorTime, cursorID, err := decodePickupListCursor(query.Cursor)
+	cursorTime, cursorType, cursorID, err := decodePickupListCursor(query.Cursor)
 	if err != nil {
 		return nil, ErrInvalidPickupListQuery
 	}
@@ -257,11 +339,14 @@ func (s *Service) ListPickups(ctx context.Context, query PickupListQuery) (*Pick
 		PickedUpFrom:  query.PickedUpFrom,
 		PickedUpTo:    query.PickedUpTo,
 		CursorTime:    cursorTime,
+		CursorType:    cursorType,
 		CursorID:      cursorID,
 		Limit:         limit + 1,
 	})
 	if err != nil {
-		s.logger.ErrorContext(ctx, "list pickups failed", "error", err, "has_search", search != "", "has_category", category != "", "has_from", query.PickedUpFrom != nil, "has_to", query.PickedUpTo != nil, "limit", limit)
+		if s.logger != nil {
+			s.logger.ErrorContext(ctx, "list pickups failed", "error", err, "has_search", search != "", "has_category", category != "", "has_from", query.PickedUpFrom != nil, "has_to", query.PickedUpTo != nil, "limit", limit)
+		}
 		return nil, err
 	}
 
@@ -273,8 +358,9 @@ func (s *Service) ListPickups(ctx context.Context, query PickupListQuery) (*Pick
 	items := make([]PickupListItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, PickupListItem{
+			Target: ScanTarget{Type: row.TargetType, ID: row.TargetID},
 			Order: PickupListOrder{
-				ID:         row.OrderID,
+				ID:         row.TargetID,
 				Number:     row.OrderNumber,
 				Status:     row.OrderStatus,
 				PickedUpAt: row.PickedUpAt.Format(time.RFC3339),
@@ -297,7 +383,7 @@ func (s *Service) ListPickups(ctx context.Context, query PickupListQuery) (*Pick
 	var nextCursor *string
 	if hasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
-		cursor := encodePickupListCursor(last.PickedUpAt, last.OrderID)
+		cursor := encodePickupListCursor(last.PickedUpAt, last.TargetType, last.TargetID)
 		nextCursor = &cursor
 	}
 
@@ -311,55 +397,29 @@ func (s *Service) ListPickups(ctx context.Context, query PickupListQuery) (*Pick
 	}, nil
 }
 
-func (s *Service) ConfirmPickup(ctx context.Context, orderID string, operatorID string) (*PickupResultResponse, error) {
-	result, err := s.repo.ConfirmPickup(ctx, orderID, operatorID)
+func (s *Service) ConfirmPickup(ctx context.Context, target ScanTarget, operatorID string, station int) (*PickupResultResponse, error) {
+	result, err := s.repo.ConfirmPickup(ctx, target, operatorID, station, newULID())
 	if err != nil {
-		s.logger.ErrorContext(ctx, "pickup confirm failed", "error", err, "order_id_hash", hashID(orderID))
+		s.logError(ctx, "pickup confirm failed", err, target)
 		return &PickupResultResponse{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
-
-	if result == nil {
-		diag, err := s.repo.DiagnosePickup(ctx, orderID)
-		if err != nil {
-			s.logger.ErrorContext(ctx, "diagnose pickup failed", "error", err, "order_id_hash", hashID(orderID))
-			return &PickupResultResponse{Outcome: OutcomeInternalError}, nil
-		}
-
-		if diag == nil {
-			return &PickupResultResponse{Outcome: OutcomeNotFound}, nil
-		}
-
-		if diag.DeletedAt != nil {
-			return &PickupResultResponse{Outcome: OutcomeNotFound}, nil
-		}
-
-		if diag.Status == nil || *diag.Status != "paid" {
-			return &PickupResultResponse{Outcome: OutcomeNotPaid}, nil
-		}
-
-		if diag.ParticipantCount != 1 {
-			if diag.ParticipantCount == 0 {
-				return &PickupResultResponse{Outcome: OutcomeParticipantMissing}, nil
-			}
-			return &PickupResultResponse{Outcome: OutcomeMultipleParticipants}, nil
-		}
-
-		if diag.RacePackPickedUpAt != nil {
-			pickedUpAt := diag.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
-			return &PickupResultResponse{
-				Outcome:    OutcomeAlreadyPickedUp,
-				PickedUpAt: &pickedUpAt,
-			}, nil
-		}
-
-		return &PickupResultResponse{Outcome: OutcomeInternalError}, nil
+	response := &PickupResultResponse{Outcome: result.Outcome}
+	if result.PickedUpAt != nil {
+		value := result.PickedUpAt.Format(time.RFC3339)
+		response.PickedUpAt = &value
 	}
+	return response, nil
+}
 
-	pickedUpAt := result.RacePackPickedUpAt.Format("2006-01-02T15:04:05+08:00")
-	return &PickupResultResponse{
-		Outcome:    OutcomePickedUp,
-		PickedUpAt: &pickedUpAt,
-	}, nil
+func (s *Service) CancelPickup(ctx context.Context, target ScanTarget, operatorID string, station int) Outcome {
+	if err := s.repo.RecordScanResult(ctx, target, operatorID, station, newULID(), "cancelled"); err != nil {
+		s.logError(ctx, "record cancelled scan failed", err, target)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return OutcomeNotFound
+		}
+		return OutcomeDatabaseUnavailable
+	}
+	return OutcomeCancelled
 }
 
 func searchPattern(value string) string {
@@ -379,35 +439,48 @@ func searchPattern(value string) string {
 	return builder.String()
 }
 
-func encodePickupListCursor(pickedUpAt time.Time, orderID string) string {
+func encodePickupListCursor(pickedUpAt time.Time, targetType TargetType, targetID string) string {
 	payload, _ := json.Marshal(pickupListCursor{
 		PickedUpAt: pickedUpAt.Format(time.RFC3339Nano),
-		OrderID:    orderID,
+		TargetType: targetType,
+		TargetID:   targetID,
 	})
 	return base64.RawURLEncoding.EncodeToString(payload)
 }
 
-func decodePickupListCursor(value string) (*time.Time, string, error) {
+func decodePickupListCursor(value string) (*time.Time, TargetType, string, error) {
 	if strings.TrimSpace(value) == "" {
-		return nil, "", nil
+		return nil, "", "", nil
 	}
 
 	payload, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	var cursor pickupListCursor
 	if err := json.Unmarshal(payload, &cursor); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	if cursor.PickedUpAt == "" || cursor.OrderID == "" {
-		return nil, "", ErrInvalidPickupListQuery
+	if cursor.TargetID == "" {
+		cursor.TargetID = cursor.OrderID
+		cursor.TargetType = TargetOrder
+	}
+	if cursor.PickedUpAt == "" || cursor.TargetID == "" || (cursor.TargetType != TargetOrder && cursor.TargetType != TargetExternalParticipant) {
+		return nil, "", "", ErrInvalidPickupListQuery
 	}
 	pickedUpAt, err := time.Parse(time.RFC3339Nano, cursor.PickedUpAt)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	return &pickedUpAt, cursor.OrderID, nil
+	return &pickedUpAt, cursor.TargetType, cursor.TargetID, nil
+}
+
+func newULID() string { return ulid.Make().String() }
+
+func (s *Service) logError(ctx context.Context, message string, err error, target ScanTarget) {
+	if s.logger != nil {
+		s.logger.ErrorContext(ctx, message, "error", err, "target_type", target.Type, "target_id_hash", hashID(target.ID))
+	}
 }
 
 func hashID(id string) string {
