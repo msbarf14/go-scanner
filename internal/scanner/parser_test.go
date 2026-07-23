@@ -123,6 +123,45 @@ func TestParseOrderULID(t *testing.T) {
 	}
 }
 
+func TestParseManualLookup(t *testing.T) {
+	tests := []struct {
+		name       string
+		lookupType string
+		payload    string
+		wantType   ManualLookupType
+		wantValue  string
+		wantOK     bool
+	}{
+		{name: "order suffix uppercase", lookupType: "order_suffix", payload: "GOG", wantType: ManualLookupOrderSuffix, wantValue: "GOG", wantOK: true},
+		{name: "order suffix normalized", lookupType: "order_suffix", payload: " gog ", wantType: ManualLookupOrderSuffix, wantValue: "GOG", wantOK: true},
+		{name: "bib number", lookupType: "bib_number", payload: "N0302", wantType: ManualLookupBIBNumber, wantValue: "N0302", wantOK: true},
+		{name: "unknown type", lookupType: "participant_name", payload: "N0302", wantOK: false},
+		{name: "empty payload", lookupType: "bib_number", payload: " ", wantOK: false},
+		{name: "slash rejected", lookupType: "order_suffix", payload: "260606/GOG", wantOK: false},
+		{name: "wildcard rejected", lookupType: "bib_number", payload: "N%", wantOK: false},
+		{name: "space rejected", lookupType: "bib_number", payload: "N 0302", wantOK: false},
+		{name: "too long rejected", lookupType: "bib_number", payload: "123456789012345678901234567890123", wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lookupType, value, outcome := ParseManualLookup(tt.lookupType, tt.payload)
+			if tt.wantOK {
+				if outcome != OutcomeValid {
+					t.Fatalf("outcome = %v, want %v", outcome, OutcomeValid)
+				}
+				if lookupType != tt.wantType || value != tt.wantValue {
+					t.Fatalf("lookup = %q/%q, want %q/%q", lookupType, value, tt.wantType, tt.wantValue)
+				}
+				return
+			}
+			if outcome != OutcomeInvalidPayload {
+				t.Fatalf("outcome = %v, want %v", outcome, OutcomeInvalidPayload)
+			}
+		})
+	}
+}
+
 func TestNormalizeStation(t *testing.T) {
 	tests := []struct {
 		name   string

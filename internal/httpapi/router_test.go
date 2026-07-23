@@ -57,6 +57,32 @@ func TestPickupListRequiresSessionWithoutCSRF(t *testing.T) {
 	}
 }
 
+func TestManualDisplayDoesNotRequireCSRF(t *testing.T) {
+	handler := newTestRouter(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/scans/manual-display", strings.NewReader(`{"lookup_type":"order_suffix","payload":"GOG"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code == http.StatusForbidden || response.Code == http.StatusUnauthorized {
+		t.Fatalf("status = %d, want display-only endpoint to bypass auth/csrf", response.Code)
+	}
+}
+
+func TestManualValidateRequiresCSRF(t *testing.T) {
+	handler := newTestRouter(t)
+	request := httptest.NewRequest(http.MethodPost, "/api/scans/manual-validate", strings.NewReader(`{"lookup_type":"order_suffix","payload":"GOG"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
 func TestPickupRequiresCSRF(t *testing.T) {
 	handler := newTestRouter(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/orders/01JXXXXXXXXXXXXXXXXXXXXXXX/pickup", strings.NewReader(`{}`))
@@ -67,6 +93,52 @@ func TestPickupRequiresCSRF(t *testing.T) {
 
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
+func TestManualValidateRequiresSession(t *testing.T) {
+	server := httptest.NewServer(newTestRouter(t))
+	defer server.Close()
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("create cookie jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+	csrfResponse, err := client.Get(server.URL + "/auth/csrf")
+	if err != nil {
+		t.Fatalf("get csrf token: %v", err)
+	}
+	defer csrfResponse.Body.Close()
+
+	var envelope respond.Envelope
+	if err := json.NewDecoder(csrfResponse.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode csrf response: %v", err)
+	}
+	data, ok := envelope.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("csrf data type = %T", envelope.Data)
+	}
+	token, ok := data["token"].(string)
+	if !ok || token == "" {
+		t.Fatal("csrf token is empty")
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/scans/manual-validate", strings.NewReader(`{"lookup_type":"order_suffix","payload":"GOG"}`))
+	if err != nil {
+		t.Fatalf("create manual validate request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-CSRF-Token", token)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("manual validate request: %v", err)
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(response.Body)
+		t.Fatalf("status = %d, want %d, body = %s", response.StatusCode, http.StatusUnauthorized, body)
 	}
 }
 

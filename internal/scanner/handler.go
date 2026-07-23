@@ -28,6 +28,12 @@ type validateRequest struct {
 	Station string `json:"station,omitempty"`
 }
 
+type manualValidateRequest struct {
+	LookupType string `json:"lookup_type"`
+	Payload    string `json:"payload"`
+	Station    string `json:"station,omitempty"`
+}
+
 func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	loggedOutcome := OutcomeInternalError
@@ -69,6 +75,58 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	loggedOutcome = result.Outcome
+
+	if result.Outcome != OutcomeValid && result.Outcome != OutcomeAlreadyPickedUp {
+		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), nil)
+		return
+	}
+
+	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), map[string]interface{}{
+		"order":       result.Order,
+		"participant": result.Participant,
+		"ticket":      result.Ticket,
+	})
+}
+
+func (h *Handler) ValidateManual(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	loggedOutcome := OutcomeInternalError
+	station := ""
+	lookupType := ""
+	orderID := ""
+	defer func() {
+		h.logManualValidate(r, start, loggedOutcome, station, lookupType, orderID)
+	}()
+
+	var req manualValidateRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		loggedOutcome = OutcomeInvalidPayload
+		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), OutcomeInvalidPayload.Message(), nil)
+		return
+	}
+	lookupType = req.LookupType
+
+	var stationOK bool
+	station, stationOK = NormalizeStation(req.Station)
+	if !stationOK {
+		loggedOutcome = OutcomeInvalidPayload
+		station = "invalid"
+		respond.JSON(w, r, OutcomeInvalidPayload.HTTPStatus(), string(OutcomeInvalidPayload), "Station tidak valid", nil)
+		return
+	}
+
+	result, err := h.service.ValidateManualLookup(r.Context(), req.LookupType, req.Payload, station)
+	if err != nil {
+		loggedOutcome = OutcomeInternalError
+		respond.JSON(w, r, OutcomeInternalError.HTTPStatus(), string(OutcomeInternalError), OutcomeInternalError.Message(), nil)
+		return
+	}
+	loggedOutcome = result.Outcome
+	if result.Order != nil {
+		orderID = result.Order.ID
+	}
 
 	if result.Outcome != OutcomeValid && result.Outcome != OutcomeAlreadyPickedUp {
 		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), nil)
@@ -243,6 +301,20 @@ func (h *Handler) logValidate(r *http.Request, start time.Time, outcome Outcome,
 		"outcome", string(outcome),
 		"duration_ms", time.Since(start).Milliseconds(),
 		"station", station,
+		"order_id_hash", hashID(orderID),
+	)
+}
+
+func (h *Handler) logManualValidate(r *http.Request, start time.Time, outcome Outcome, station string, lookupType string, orderID string) {
+	if h.logger == nil {
+		return
+	}
+	h.logger.InfoContext(r.Context(), "manual scan validate outcome",
+		"request_id", contextutil.RequestIDFromContext(r.Context()),
+		"outcome", string(outcome),
+		"duration_ms", time.Since(start).Milliseconds(),
+		"station", station,
+		"lookup_type", lookupType,
 		"order_id_hash", hashID(orderID),
 	)
 }

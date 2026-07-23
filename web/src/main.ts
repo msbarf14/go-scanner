@@ -11,6 +11,7 @@ import {
   unreadableFeedback,
   type CameraFeedback,
 } from './scanner/feedback';
+import { normalizeManualLookup, type ManualLookupType } from './scanner/manual-lookup';
 import { extractOrderId } from './scanner/parser';
 import type { CameraCapabilities, CameraStatus } from './scanner/types';
 
@@ -83,6 +84,7 @@ let loginModal: HTMLElement | null = null;
 let activeVerification: VerificationState | null = null;
 let connectionStatus: ConnectionStatus = navigator.onLine ? 'checking' : 'offline';
 let inputMode: InputMode = 'scanner';
+let manualLookupType: ManualLookupType = 'ticket';
 let cameraRequested = false;
 let cameraStatus: CameraStatus = {
   state: 'idle',
@@ -181,6 +183,9 @@ function render() {
   document.getElementById('logoutButton')?.addEventListener('click', () => void logout());
   document.getElementById('scannerModeButton')?.addEventListener('click', () => void setInputMode('scanner'));
   document.getElementById('cameraModeButton')?.addEventListener('click', () => void setInputMode('camera'));
+  document.querySelectorAll<HTMLButtonElement>('[data-manual-lookup-type]').forEach((button) => {
+    button.addEventListener('click', () => setManualLookupType(button.dataset.manualLookupType as ManualLookupType));
+  });
   document.getElementById('cameraRetryButton')?.addEventListener('click', () => retryCamera());
   document.getElementById('cameraFallbackButton')?.addEventListener('click', () => void setInputMode('scanner'));
   document.getElementById('cameraFeedbackDismiss')?.addEventListener('click', () => {
@@ -200,6 +205,45 @@ function render() {
     startCameraIfPossible();
   }
   focusInput();
+}
+
+function manualLookupLabel(type: ManualLookupType): string {
+  switch (type) {
+    case 'order_suffix':
+      return 'Order suffix';
+    case 'bib_number':
+      return 'BIB';
+    default:
+      return 'QR Ticket';
+  }
+}
+
+function scanInputLabel(): string {
+  if (manualLookupType === 'order_suffix') return 'Input suffix nomor order';
+  if (manualLookupType === 'bib_number') return 'Input nomor BIB lengkap';
+  return racePackMode ? 'Scan QR Code untuk Penyerahan Race Pack' : 'Scan QR Code Tiket';
+}
+
+function scanInputPlaceholder(): string {
+  if (manualLookupType === 'order_suffix') return 'Contoh: GOG';
+  if (manualLookupType === 'bib_number') return 'Contoh: N0302';
+  return 'Arahkan barcode scanner ke QR Code tiket...';
+}
+
+function renderManualLookupButtons(): string {
+  const options: ManualLookupType[] = ['ticket', 'order_suffix', 'bib_number'];
+  return `
+    <div class="manual-lookup-control" role="group" aria-label="Pilih jenis input scanner">
+      ${options.map((option) => `
+        <button
+          class="manual-lookup-button ${manualLookupType === option ? 'manual-lookup-button-active' : ''}"
+          type="button"
+          data-manual-lookup-type="${option}"
+          aria-pressed="${manualLookupType === option}"
+        >${manualLookupLabel(option)}</button>
+      `).join('')}
+    </div>
+  `;
 }
 
 function renderScannerPage(): string {
@@ -260,11 +304,12 @@ function renderScannerPage(): string {
               <button id="cameraModeButton" class="input-mode-button" type="button" aria-pressed="false" ${modeSwitchDisabled('camera') ? 'disabled' : ''}>Kamera</button>
             </div>
             <div class="scanner-mode-panel">
+              ${renderManualLookupButtons()}
               <label class="scan-label" for="scanInput">
-                ${racePackMode ? 'Scan QR Code untuk Penyerahan Race Pack' : 'Scan QR Code Tiket'}
+                ${escapeHtml(scanInputLabel())}
               </label>
-              <input id="scanInput" type="text" autocomplete="off" autofocus placeholder="Arahkan barcode scanner ke QR Code tiket..." class="scan-input" />
-              <p class="scan-hint">Gunakan scanner USB/Bluetooth atau ketik payload secara manual. Klik di mana saja untuk re-focus.</p>
+              <input id="scanInput" type="text" autocomplete="off" autofocus placeholder="${escapeHtml(scanInputPlaceholder())}" class="scan-input" />
+              <p class="scan-hint">QR, order suffix, dan BIB dapat dipakai untuk Display Only. Login hanya diperlukan saat toggle Race Pack aktif.</p>
             </div>
           </div>
         </form>
@@ -558,12 +603,16 @@ function setScannerControlsDisabled(disabled: boolean) {
   const logoutButton = document.getElementById('logoutButton') as HTMLButtonElement | null;
   const scannerModeButton = document.getElementById('scannerModeButton') as HTMLButtonElement | null;
   const cameraModeButton = document.getElementById('cameraModeButton') as HTMLButtonElement | null;
+  const manualLookupButtons = document.querySelectorAll<HTMLButtonElement>('[data-manual-lookup-type]');
 
   if (input) input.disabled = disabled;
   if (toggle) toggle.disabled = disabled;
   if (logoutButton) logoutButton.disabled = disabled;
   if (scannerModeButton) scannerModeButton.disabled = disabled;
   if (cameraModeButton) cameraModeButton.disabled = disabled;
+  manualLookupButtons.forEach((button) => {
+    button.disabled = disabled;
+  });
 }
 
 function updateCameraUI() {
@@ -606,6 +655,13 @@ function cameraUnsafe(): boolean {
 function modeSwitchDisabled(mode: InputMode): boolean {
   if (cameraUnsafe()) return true;
   return mode === 'camera' && cameraScanner.isStarting();
+}
+
+function setManualLookupType(type: ManualLookupType) {
+  if (type !== 'ticket' && type !== 'order_suffix' && type !== 'bib_number') return;
+  if (manualLookupType === type) return;
+  manualLookupType = type;
+  render();
 }
 
 function setInputMode(mode: InputMode) {
@@ -914,10 +970,23 @@ async function submitScanPayload(payload: string) {
   }
 
   const orderId = extractOrderId(payload);
-  if (!orderId) {
+  const useManualLookup = inputMode === 'scanner' && manualLookupType !== 'ticket' && !orderId;
+  if (!orderId && !useManualLookup) {
     if (inputMode === 'camera') setCameraFeedback(unreadableFeedback('QR Code tidak valid. Posisikan QR penuh di kotak, kurangi pantulan, atau gunakan Scanner/manual.'));
     showResult('error', 'QR Code tidak valid — format URL tidak dikenali');
     resumeCameraIfSafe();
+    return;
+  }
+
+  const manualPayload = useManualLookup ? normalizeManualLookup(manualLookupType, payload) : null;
+  if (useManualLookup && !manualPayload) {
+    showResult('error', manualLookupType === 'order_suffix' ? 'Suffix order hanya boleh huruf/angka, contoh GOG' : 'Nomor BIB harus lengkap dan hanya huruf/angka, contoh N0302');
+    return;
+  }
+
+  if (useManualLookup && racePackMode && authStatus !== 'authenticated' && !(await refreshSession())) {
+    showResult('error', 'Lookup manual Race Pack perlu login operator.');
+    openLoginModal();
     return;
   }
 
@@ -939,10 +1008,25 @@ async function submitScanPayload(payload: string) {
   showResult('loading', 'Memvalidasi tiket...');
 
   try {
-    const response = await fetch(`${API_BASE}/api/scans/validate`, {
+    const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    let requestURL = `${API_BASE}/api/scans/validate`;
+    let requestBody = JSON.stringify({ payload, station: station.toString() });
+    let requestCredentials: RequestCredentials | undefined;
+
+    if (useManualLookup && manualPayload) {
+      requestURL = `${API_BASE}${racePackMode ? '/api/scans/manual-validate' : '/api/scans/manual-display'}`;
+      if (racePackMode) {
+        requestHeaders['X-CSRF-Token'] = await ensureCSRFToken();
+        requestCredentials = 'same-origin';
+      }
+      requestBody = JSON.stringify({ lookup_type: manualLookupType, payload: manualPayload, station: station.toString() });
+    }
+
+    const response = await fetch(requestURL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ payload, station: station.toString() }),
+      credentials: requestCredentials,
+      headers: requestHeaders,
+      body: requestBody,
     });
 
     if (response.status >= 500) {
@@ -952,6 +1036,14 @@ async function submitScanPayload(payload: string) {
     }
 
     const data: ScanResult = await response.json();
+    if (useManualLookup && (response.status === 401 || response.status === 403)) {
+      authStatus = 'anonymous';
+      csrfToken = null;
+      racePackMode = false;
+      if (inputMode === 'camera') setCameraFeedback(authFeedback(data.message));
+      showResult('error', 'Session Race Pack berakhir. Login ulang lalu scan kembali.');
+      return;
+    }
     handleScanResult(data);
   } catch {
     setConnectionStatus('offline');

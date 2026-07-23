@@ -41,6 +41,7 @@ func NewRouter(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /api/display", deps.Scanner.Display)
 	mux.HandleFunc("POST /api/scans/validate", deps.Scanner.Validate)
+	mux.HandleFunc("POST /api/scans/manual-display", deps.Scanner.ValidateManual)
 	mux.Handle("GET /api/race-pack-pickups", deps.Auth.RequireAuth(http.HandlerFunc(deps.Scanner.ListPickups)))
 	mux.Handle("GET /auth/session", http.HandlerFunc(deps.Auth.Session))
 
@@ -48,6 +49,7 @@ func NewRouter(deps Deps) http.Handler {
 	protectedMux.HandleFunc("GET /auth/csrf", deps.Auth.CSRFToken)
 	protectedMux.HandleFunc("POST /auth/login", deps.Auth.Login)
 	protectedMux.HandleFunc("POST /auth/logout", deps.Auth.Logout)
+	protectedMux.Handle("POST /api/scans/manual-validate", deps.Auth.RequireAuth(http.HandlerFunc(deps.Scanner.ValidateManual)))
 	protectedMux.Handle("POST /api/orders/{order_ulid}/pickup", deps.Auth.RequireAuth(http.HandlerFunc(deps.Scanner.Pickup)))
 
 	trustedOrigins := []string{}
@@ -74,6 +76,7 @@ func NewRouter(deps Deps) http.Handler {
 	}
 
 	mux.Handle("/auth/", csrfProtected)
+	mux.Handle("POST /api/scans/manual-validate", csrfProtected)
 	mux.Handle("POST /api/orders/{order_ulid}/pickup", csrfProtected)
 
 	displayHandler := web.DisplayHandler()

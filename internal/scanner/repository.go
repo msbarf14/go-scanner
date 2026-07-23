@@ -13,6 +13,12 @@ import (
 //go:embed sql/lookup_order.sql
 var lookupOrderSQL string
 
+//go:embed sql/resolve_order_suffix.sql
+var resolveOrderSuffixSQL string
+
+//go:embed sql/resolve_bib_number.sql
+var resolveBIBNumberSQL string
+
 //go:embed sql/pickup.sql
 var pickupSQL string
 
@@ -44,6 +50,40 @@ type OrderLookup struct {
 	UkuranJersey         *string
 	TicketCategory       *string
 	ParticipantCount     int
+}
+
+type ManualLookupResolution struct {
+	OrderID string
+	Count   int
+}
+
+func (r *Repository) ResolveManualLookup(ctx context.Context, lookupType ManualLookupType, value string) (ManualLookupResolution, error) {
+	query := resolveOrderSuffixSQL
+	if lookupType == ManualLookupBIBNumber {
+		query = resolveBIBNumberSQL
+	}
+
+	rows, err := r.pool.Query(ctx, query, value)
+	if err != nil {
+		return ManualLookupResolution{}, err
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return ManualLookupResolution{}, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return ManualLookupResolution{}, err
+	}
+	if len(ids) != 1 {
+		return ManualLookupResolution{Count: len(ids)}, nil
+	}
+	return ManualLookupResolution{OrderID: ids[0], Count: 1}, nil
 }
 
 func (r *Repository) LookupOrder(ctx context.Context, orderID string) (*OrderLookup, error) {

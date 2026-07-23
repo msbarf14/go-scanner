@@ -123,6 +123,27 @@ type pickupListCursor struct {
 	OrderID    string `json:"order_id"`
 }
 
+func (s *Service) ValidateManualLookup(ctx context.Context, lookupType string, payload string, station string) (*ValidateResult, error) {
+	manualLookupType, value, outcome := ParseManualLookup(lookupType, payload)
+	if outcome != OutcomeValid {
+		return &ValidateResult{Outcome: outcome}, nil
+	}
+
+	resolution, err := s.repo.ResolveManualLookup(ctx, manualLookupType, value)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "manual lookup failed", "error", err, "lookup_type", string(manualLookupType))
+		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
+	}
+	if resolution.Count == 0 {
+		return &ValidateResult{Outcome: OutcomeNotFound}, nil
+	}
+	if resolution.Count > 1 {
+		return &ValidateResult{Outcome: OutcomeAmbiguousLookup}, nil
+	}
+
+	return s.Validate(ctx, resolution.OrderID, station)
+}
+
 func (s *Service) Validate(ctx context.Context, orderID string, station string) (*ValidateResult, error) {
 	lookup, err := s.repo.LookupOrder(ctx, orderID)
 	if err != nil {

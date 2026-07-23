@@ -8,6 +8,14 @@ import (
 const (
 	ulidLength = 26
 	maxPayloadLength = 512
+	maxManualLookupLength = 32
+)
+
+type ManualLookupType string
+
+const (
+	ManualLookupOrderSuffix ManualLookupType = "order_suffix"
+	ManualLookupBIBNumber    ManualLookupType = "bib_number"
 )
 
 var validULIDChars = map[byte]bool{
@@ -51,6 +59,34 @@ func extractRawULID(s string) (string, bool) {
 	}
 	
 	return upper, true
+}
+
+func ParseManualLookup(lookupType string, payload string) (ManualLookupType, string, Outcome) {
+	lookup := ManualLookupType(strings.TrimSpace(lookupType))
+	value := strings.ToUpper(strings.TrimSpace(payload))
+	if lookup != ManualLookupOrderSuffix && lookup != ManualLookupBIBNumber {
+		return "", "", OutcomeInvalidPayload
+	}
+	if !validManualLookupValue(value) {
+		return "", "", OutcomeInvalidPayload
+	}
+	return lookup, value, OutcomeValid
+}
+
+func validManualLookupValue(value string) bool {
+	if len(value) == 0 || len(value) > maxManualLookupLength {
+		return false
+	}
+	for _, char := range value {
+		if char >= 'A' && char <= 'Z' {
+			continue
+		}
+		if char >= '0' && char <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func extractFromURL(s string) (string, bool) {
