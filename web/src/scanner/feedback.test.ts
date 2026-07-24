@@ -9,19 +9,6 @@ import {
 } from './feedback';
 
 describe('camera feedback', () => {
-  it('directs a runner to the correct station', () => {
-    expect(scanFeedback({
-      outcome: 'station_mismatch',
-      message: 'Tiket ini dilayani di Station #2. Silakan menuju Station #2.',
-      racePackMode: false,
-    })).toMatchObject({
-      kind: 'error',
-      tone: 'danger',
-      title: 'Station tidak sesuai',
-      persistent: true,
-    });
-  });
-
   it('maps valid normal scan to success feedback', () => {
     expect(scanFeedback({
       outcome: 'valid',

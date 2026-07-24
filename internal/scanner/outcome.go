@@ -15,7 +15,6 @@ const (
 	OutcomeMultipleParticipants Outcome = "multiple_participants"
 	OutcomeAlreadyPickedUp      Outcome = "already_picked_up"
 	OutcomeAmbiguousLookup      Outcome = "ambiguous_lookup"
-	OutcomeStationMismatch      Outcome = "station_mismatch"
 	OutcomeUnauthenticated      Outcome = "unauthenticated"
 	OutcomeForbidden            Outcome = "forbidden"
 	OutcomeDatabaseUnavailable  Outcome = "database_unavailable"
@@ -30,7 +29,7 @@ func (o Outcome) HTTPStatus() int {
 		return http.StatusUnprocessableEntity
 	case OutcomeNotFound:
 		return http.StatusNotFound
-	case OutcomeNotPaid, OutcomeParticipantMissing, OutcomeMultipleParticipants, OutcomeAlreadyPickedUp, OutcomeAmbiguousLookup, OutcomeStationMismatch:
+	case OutcomeNotPaid, OutcomeParticipantMissing, OutcomeMultipleParticipants, OutcomeAlreadyPickedUp, OutcomeAmbiguousLookup:
 		return http.StatusConflict
 	case OutcomeUnauthenticated:
 		return http.StatusUnauthorized
@@ -65,8 +64,6 @@ func (o Outcome) Message() string {
 		return "Race pack sudah pernah diambil"
 	case OutcomeAmbiguousLookup:
 		return "Lookup manual cocok ke lebih dari satu order, hubungi supervisor"
-	case OutcomeStationMismatch:
-		return "Kategori tiket tidak sesuai dengan station ini"
 	case OutcomeUnauthenticated:
 		return "Session tidak valid"
 	case OutcomeForbidden:

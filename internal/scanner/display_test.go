@@ -41,17 +41,3 @@ func TestDisplayOutcomeGetsNewScanID(t *testing.T) {
 		t.Fatal("repeated outcome must publish a new scan_id")
 	}
 }
-
-func TestDisplayOutcomePreservesStationMismatchMessage(t *testing.T) {
-	service := NewService(nil, nil)
-	message := "Tiket ini dilayani di Station #2. Silakan menuju Station #2."
-	service.PublishDisplayOutcomeMessage(t.Context(), "1", OutcomeStationMismatch, message)
-
-	display := service.GetDisplayData("1")
-	if display == nil || display.Outcome != OutcomeStationMismatch || display.Message != message {
-		t.Fatalf("display = %#v", display)
-	}
-	if display.Target != nil || display.Order != nil || display.Participant != nil || display.Ticket != nil {
-		t.Fatalf("station mismatch leaked runner data: %#v", display)
-	}
-}

@@ -114,10 +114,8 @@ func (r *Repository) LookupExternalParticipant(ctx context.Context, id string) (
 }
 
 type PickupMutationResult struct {
-	Outcome        Outcome
-	Message        string
-	PickedUpAt     *time.Time
-	TicketCategory *string
+	Outcome    Outcome
+	PickedUpAt *time.Time
 }
 
 func (r *Repository) ConfirmPickup(ctx context.Context, target ScanTarget, operatorID string, station int, logID string) (*PickupMutationResult, error) {
@@ -133,12 +131,6 @@ func (r *Repository) ConfirmPickup(ctx context.Context, target ScanTarget, opera
 	result, err := lockTarget(ctx, tx, target)
 	if err != nil {
 		return nil, err
-	}
-	if result.Outcome != OutcomeNotFound {
-		decision := evaluateStationCategory(station, result.TicketCategory)
-		if !decision.Allowed {
-			return &PickupMutationResult{Outcome: OutcomeStationMismatch, Message: decision.Message}, nil
-		}
 	}
 	if result.Outcome != OutcomeValid {
 		if result.Outcome == OutcomeAlreadyPickedUp {
@@ -196,17 +188,8 @@ func lockTarget(ctx context.Context, tx pgx.Tx, target ScanTarget) (*PickupMutat
 	if target.Type == TargetOrder {
 		var status *string
 		var deletedAt, pickedAt *time.Time
-		var ticketCategory *string
 		var participantCount int
-		err := tx.QueryRow(ctx, `
-			SELECT o.status, o.deleted_at, o.race_pack_picked_up_at,
-				(SELECT COUNT(*) FROM participants WHERE order_id = o.id),
-				COALESCE(tparent.name, t.name)
-			FROM orders o
-			LEFT JOIN tickets t ON t.id = o.ticket_id
-			LEFT JOIN tickets tparent ON tparent.id = t.parent_id
-			WHERE o.id = $1
-			FOR UPDATE OF o`, target.ID).Scan(&status, &deletedAt, &pickedAt, &participantCount, &ticketCategory)
+		err := tx.QueryRow(ctx, `SELECT status, deleted_at, race_pack_picked_up_at, (SELECT COUNT(*) FROM participants WHERE order_id = orders.id) FROM orders WHERE id = $1 FOR UPDATE`, target.ID).Scan(&status, &deletedAt, &pickedAt, &participantCount)
 		if errors.Is(err, pgx.ErrNoRows) || deletedAt != nil {
 			return &PickupMutationResult{Outcome: OutcomeNotFound}, nil
 		}
@@ -214,28 +197,22 @@ func lockTarget(ctx context.Context, tx pgx.Tx, target ScanTarget) (*PickupMutat
 			return nil, err
 		}
 		if status == nil || *status != "paid" {
-			return &PickupMutationResult{Outcome: OutcomeNotPaid, TicketCategory: ticketCategory}, nil
+			return &PickupMutationResult{Outcome: OutcomeNotPaid}, nil
 		}
 		if participantCount == 0 {
-			return &PickupMutationResult{Outcome: OutcomeParticipantMissing, TicketCategory: ticketCategory}, nil
+			return &PickupMutationResult{Outcome: OutcomeParticipantMissing}, nil
 		}
 		if participantCount > 1 {
-			return &PickupMutationResult{Outcome: OutcomeMultipleParticipants, TicketCategory: ticketCategory}, nil
+			return &PickupMutationResult{Outcome: OutcomeMultipleParticipants}, nil
 		}
 		if pickedAt != nil {
-			return &PickupMutationResult{Outcome: OutcomeAlreadyPickedUp, PickedUpAt: pickedAt, TicketCategory: ticketCategory}, nil
+			return &PickupMutationResult{Outcome: OutcomeAlreadyPickedUp, PickedUpAt: pickedAt}, nil
 		}
-		return &PickupMutationResult{Outcome: OutcomeValid, TicketCategory: ticketCategory}, nil
+		return &PickupMutationResult{Outcome: OutcomeValid}, nil
 	}
 
 	var deletedAt, pickedAt *time.Time
-	var ticketCategory *string
-	err := tx.QueryRow(ctx, `
-		SELECT ep.deleted_at, ep.race_pack_picked_up_at, t.name
-		FROM external_participants ep
-		LEFT JOIN tickets t ON t.id = ep.category_ticket_id
-		WHERE ep.id = $1
-		FOR UPDATE OF ep`, target.ID).Scan(&deletedAt, &pickedAt, &ticketCategory)
+	err := tx.QueryRow(ctx, `SELECT deleted_at, race_pack_picked_up_at FROM external_participants WHERE id = $1 FOR UPDATE`, target.ID).Scan(&deletedAt, &pickedAt)
 	if errors.Is(err, pgx.ErrNoRows) || deletedAt != nil {
 		return &PickupMutationResult{Outcome: OutcomeNotFound}, nil
 	}
@@ -243,9 +220,9 @@ func lockTarget(ctx context.Context, tx pgx.Tx, target ScanTarget) (*PickupMutat
 		return nil, err
 	}
 	if pickedAt != nil {
-		return &PickupMutationResult{Outcome: OutcomeAlreadyPickedUp, PickedUpAt: pickedAt, TicketCategory: ticketCategory}, nil
+		return &PickupMutationResult{Outcome: OutcomeAlreadyPickedUp, PickedUpAt: pickedAt}, nil
 	}
-	return &PickupMutationResult{Outcome: OutcomeValid, TicketCategory: ticketCategory}, nil
+	return &PickupMutationResult{Outcome: OutcomeValid}, nil
 }
 
 func insertScanLog(ctx context.Context, tx pgx.Tx, logID string, target ScanTarget, operatorID string, station int, result string) error {

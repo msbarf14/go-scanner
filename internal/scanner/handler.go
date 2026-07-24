@@ -81,11 +81,11 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 	loggedOutcome = result.Outcome
 
 	if result.Outcome != OutcomeValid && result.Outcome != OutcomeAlreadyPickedUp {
-		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), nil)
+		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), nil)
 		return
 	}
 
-	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), map[string]interface{}{
+	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), map[string]interface{}{
 		"target":      result.Target,
 		"order":       result.Order,
 		"participant": result.Participant,
@@ -130,10 +130,10 @@ func (h *Handler) ValidateRacePack(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) respondValidation(w http.ResponseWriter, r *http.Request, result *ValidateResult) {
 	if result.Outcome != OutcomeValid && result.Outcome != OutcomeAlreadyPickedUp {
-		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), nil)
+		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), nil)
 		return
 	}
-	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), map[string]interface{}{"target": result.Target, "order": result.Order, "participant": result.Participant, "ticket": result.Ticket})
+	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), map[string]interface{}{"target": result.Target, "order": result.Order, "participant": result.Participant, "ticket": result.Ticket})
 }
 
 func (h *Handler) ValidateManual(w http.ResponseWriter, r *http.Request) {
@@ -188,11 +188,11 @@ func (h *Handler) ValidateManual(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if result.Outcome != OutcomeValid && result.Outcome != OutcomeAlreadyPickedUp {
-		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), nil)
+		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), nil)
 		return
 	}
 
-	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), map[string]interface{}{
+	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), map[string]interface{}{
 		"target":      result.Target,
 		"order":       result.Order,
 		"participant": result.Participant,
@@ -291,10 +291,6 @@ func (h *Handler) Pickup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	loggedOutcome = result.Outcome
-	if result.Outcome == OutcomeStationMismatch {
-		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), nil)
-		return
-	}
 
 	data := map[string]interface{}{
 		"order_id": orderID,
@@ -303,7 +299,7 @@ func (h *Handler) Pickup(w http.ResponseWriter, r *http.Request) {
 		data["picked_up_at"] = *result.PickedUpAt
 	}
 
-	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), data)
+	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), data)
 }
 
 type targetMutationRequest struct {
@@ -348,15 +344,11 @@ func (h *Handler) mutateTarget(w http.ResponseWriter, r *http.Request, cancel bo
 		respond.JSON(w, r, OutcomeInternalError.HTTPStatus(), string(OutcomeInternalError), OutcomeInternalError.Message(), nil)
 		return
 	}
-	if result.Outcome == OutcomeStationMismatch {
-		respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), nil)
-		return
-	}
 	data := map[string]interface{}{"target": target}
 	if result.PickedUpAt != nil {
 		data["picked_up_at"] = *result.PickedUpAt
 	}
-	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.ResponseMessage(), data)
+	respond.JSON(w, r, result.Outcome.HTTPStatus(), string(result.Outcome), result.Outcome.Message(), data)
 }
 
 func parsePickupListQuery(values map[string][]string) (PickupListQuery, bool) {
