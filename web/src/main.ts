@@ -1007,12 +1007,6 @@ async function submitScanPayload(payload: string) {
 
   const scanTarget = extractScanTarget(payload);
   const useManualLookup = inputMode === 'scanner' && manualLookupType !== 'ticket' && !scanTarget;
-  if (!scanTarget && !useManualLookup) {
-    if (inputMode === 'camera') setCameraFeedback(unreadableFeedback('QR Code tidak valid. Posisikan QR penuh di kotak, kurangi pantulan, atau gunakan Scanner/manual.'));
-    showResult('error', 'QR Code tidak valid — format URL tidak dikenali');
-    resumeCameraIfSafe();
-    return;
-  }
 
   const manualPayload = useManualLookup ? normalizeManualLookup(manualLookupType, payload) : null;
   if (useManualLookup && !manualPayload) {

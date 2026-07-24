@@ -65,6 +65,9 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 	target = parsedTarget
 	if outcome != OutcomeValid {
 		loggedOutcome = outcome
+		if h.service != nil {
+			h.service.PublishDisplayOutcome(r.Context(), station, outcome)
+		}
 		respond.JSON(w, r, outcome.HTTPStatus(), string(outcome), outcome.Message(), nil)
 		return
 	}
@@ -105,6 +108,9 @@ func (h *Handler) ValidateRacePack(w http.ResponseWriter, r *http.Request) {
 	}
 	target, outcome := ParseScanTarget(req.Payload)
 	if outcome != OutcomeValid {
+		if h.service != nil {
+			h.service.PublishDisplayOutcome(r.Context(), station, outcome)
+		}
 		respond.JSON(w, r, outcome.HTTPStatus(), string(outcome), outcome.Message(), nil)
 		return
 	}

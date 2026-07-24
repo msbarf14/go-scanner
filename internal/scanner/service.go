@@ -76,12 +76,14 @@ type TicketInfo struct {
 type DisplayData struct {
 	Version     int              `json:"v"`
 	ScanID      string           `json:"scan_id"`
-	Type        TargetType       `json:"type"`
-	ID          string           `json:"id"`
-	Target      *TargetInfo      `json:"target"`
+	Outcome     Outcome          `json:"outcome"`
+	Message     string           `json:"message"`
+	Type        TargetType       `json:"type,omitempty"`
+	ID          string           `json:"id,omitempty"`
+	Target      *TargetInfo      `json:"target,omitempty"`
 	Order       *OrderInfo       `json:"order,omitempty"`
-	Participant *ParticipantInfo `json:"participant"`
-	Ticket      *TicketInfo      `json:"ticket"`
+	Participant *ParticipantInfo `json:"participant,omitempty"`
+	Ticket      *TicketInfo      `json:"ticket,omitempty"`
 	ScannedAt   string           `json:"scanned_at"`
 }
 
@@ -145,11 +147,13 @@ type pickupListCursor struct {
 func (s *Service) ValidateManualLookup(ctx context.Context, sourceValue string, lookupType string, payload string, station string) (*ValidateResult, error) {
 	manualLookupType, value, outcome := ParseManualLookup(lookupType, payload)
 	if outcome != OutcomeValid {
+		s.PublishDisplayOutcome(ctx, station, outcome)
 		return &ValidateResult{Outcome: outcome}, nil
 	}
 
 	source, ok := ParseManualSource(sourceValue)
 	if !ok || (source == ManualSourceVIP && manualLookupType == ManualLookupOrderSuffix) {
+		s.PublishDisplayOutcome(ctx, station, OutcomeInvalidPayload)
 		return &ValidateResult{Outcome: OutcomeInvalidPayload}, nil
 	}
 	resolution, err := s.repo.ResolveManualLookup(ctx, source, manualLookupType, value)
@@ -157,12 +161,15 @@ func (s *Service) ValidateManualLookup(ctx context.Context, sourceValue string, 
 		if s.logger != nil {
 			s.logger.ErrorContext(ctx, "manual lookup failed", "error", err, "lookup_type", string(manualLookupType), "source", source)
 		}
+		s.PublishDisplayOutcome(ctx, station, OutcomeDatabaseUnavailable)
 		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
 	if resolution.Count == 0 {
+		s.PublishDisplayOutcome(ctx, station, OutcomeNotFound)
 		return &ValidateResult{Outcome: OutcomeNotFound}, nil
 	}
 	if resolution.Count > 1 {
+		s.PublishDisplayOutcome(ctx, station, OutcomeAmbiguousLookup)
 		return &ValidateResult{Outcome: OutcomeAmbiguousLookup}, nil
 	}
 
@@ -171,6 +178,7 @@ func (s *Service) ValidateManualLookup(ctx context.Context, sourceValue string, 
 
 func (s *Service) Validate(ctx context.Context, target ScanTarget, station string) (*ValidateResult, error) {
 	if target.Type != TargetOrder && target.Type != TargetExternalParticipant {
+		s.PublishDisplayOutcome(ctx, station, OutcomeInvalidPayload)
 		return &ValidateResult{Outcome: OutcomeInvalidPayload}, nil
 	}
 	if target.Type == TargetExternalParticipant {
@@ -179,22 +187,27 @@ func (s *Service) Validate(ctx context.Context, target ScanTarget, station strin
 	lookup, err := s.repo.LookupOrder(ctx, target.ID)
 	if err != nil {
 		s.logError(ctx, "lookup order failed", err, target)
+		s.PublishDisplayOutcome(ctx, station, OutcomeDatabaseUnavailable)
 		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
 
 	if lookup == nil {
+		s.PublishDisplayOutcome(ctx, station, OutcomeNotFound)
 		return &ValidateResult{Outcome: OutcomeNotFound}, nil
 	}
 
 	if lookup.Status == nil || *lookup.Status != "paid" {
+		s.PublishDisplayOutcome(ctx, station, OutcomeNotPaid)
 		return &ValidateResult{Outcome: OutcomeNotPaid}, nil
 	}
 
 	if lookup.ParticipantCount == 0 {
+		s.PublishDisplayOutcome(ctx, station, OutcomeParticipantMissing)
 		return &ValidateResult{Outcome: OutcomeParticipantMissing}, nil
 	}
 
 	if lookup.ParticipantCount > 1 {
+		s.PublishDisplayOutcome(ctx, station, OutcomeMultipleParticipants)
 		return &ValidateResult{Outcome: OutcomeMultipleParticipants}, nil
 	}
 
@@ -232,9 +245,11 @@ func (s *Service) validateExternal(ctx context.Context, target ScanTarget, stati
 	lookup, err := s.repo.LookupExternalParticipant(ctx, target.ID)
 	if err != nil {
 		s.logError(ctx, "lookup external participant failed", err, target)
+		s.PublishDisplayOutcome(ctx, station, OutcomeDatabaseUnavailable)
 		return &ValidateResult{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
 	if lookup == nil {
+		s.PublishDisplayOutcome(ctx, station, OutcomeNotFound)
 		return &ValidateResult{Outcome: OutcomeNotFound}, nil
 	}
 	displayName := lookup.Name
@@ -282,10 +297,21 @@ func (s *Service) publishDisplay(ctx context.Context, station string, target Sca
 	if station == "" {
 		return
 	}
-	data := &DisplayData{Version: 3, ScanID: newULID(), Type: target.Type, ID: target.ID, Target: result.Target, Order: result.Order, Participant: result.Participant, Ticket: result.Ticket, ScannedAt: time.Now().Format(time.RFC3339Nano)}
+	data := &DisplayData{Version: 3, ScanID: newULID(), Outcome: result.Outcome, Message: result.Outcome.Message(), Type: target.Type, ID: target.ID, Target: result.Target, Order: result.Order, Participant: result.Participant, Ticket: result.Ticket, ScannedAt: time.Now().Format(time.RFC3339Nano)}
 	s.displayCache.Set(fmt.Sprintf("display:%s", station), data, 2*time.Minute)
 	if s.logger != nil {
 		s.logger.InfoContext(ctx, "display data cached", "station", station, "target_type", target.Type, "target_id_hash", hashID(target.ID))
+	}
+}
+
+func (s *Service) PublishDisplayOutcome(ctx context.Context, station string, outcome Outcome) {
+	if station == "" {
+		return
+	}
+	data := &DisplayData{Version: 3, ScanID: newULID(), Outcome: outcome, Message: outcome.Message(), ScannedAt: time.Now().Format(time.RFC3339Nano)}
+	s.displayCache.Set(fmt.Sprintf("display:%s", station), data, 2*time.Minute)
+	if s.logger != nil {
+		s.logger.InfoContext(ctx, "display outcome cached", "station", station, "outcome", outcome)
 	}
 }
 

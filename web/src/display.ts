@@ -7,21 +7,23 @@ const ASSET_VERSION = import.meta.env.VITE_ASSET_VERSION ?? '11';
 interface DisplayData {
   v: number;
   scan_id: string;
-  type: 'order' | 'external_participant';
-  id: string;
+  outcome: string;
+  message: string;
+  type?: 'order' | 'external_participant';
+  id?: string;
   order?: {
     id: string;
     number?: string;
     race_pack_picked_up: boolean;
     race_pack_picked_up_at?: string;
   };
-  participant: {
+  participant?: {
     name?: string;
     bib_name?: string;
     bib_number?: string;
     jersey_size?: string;
   };
-  ticket: {
+  ticket?: {
     category?: string;
   };
   scanned_at: string;
@@ -51,6 +53,7 @@ interface DisplayFallback {
 let station = 1;
 let debugScanner = false;
 let currentData: DisplayData | null = null;
+let lastScanID: string | null = null;
 let fallback: DisplayFallback | null = null;
 let fallbackTimer: number | null = null;
 let show = false;
@@ -188,6 +191,15 @@ function showScanFallback(outcome: string, message?: string) {
     return;
   }
 
+  if (outcome === 'database_unavailable' || outcome === 'internal_error') {
+    showFallback({
+      kind: 'error',
+      title: 'KONEKSI BERMASALAH',
+      message: message || 'Scan belum bisa diproses. Coba ulangi setelah koneksi stabil.',
+    });
+    return;
+  }
+
   showFallback({
     kind: 'invalid',
     title: 'QR CODE TIDAK VALID',
@@ -234,9 +246,13 @@ async function fetchDisplayData() {
     const data: DisplayResponse = await res.json();
     const newData = data.data.display;
 
-    if (fallback) return;
-
-    if (newData && (!currentData || newData.scan_id !== currentData.scan_id)) {
+    if (newData && newData.scan_id !== lastScanID) {
+      lastScanID = newData.scan_id;
+      if (newData.outcome !== 'valid' && newData.outcome !== 'already_picked_up') {
+        showScanFallback(newData.outcome, newData.message);
+        return;
+      }
+      clearFallback();
       currentData = newData;
       show = false;
       render();
