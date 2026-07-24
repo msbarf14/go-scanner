@@ -19,7 +19,7 @@ INSERT INTO model_has_permissions (permission_id, model_type, model_id) VALUES
     ('01J00000000000000000000020', 'App\\Models\\User', '01J00000000000000000000003');
 
 INSERT INTO tickets (id, parent_id, name, created_at, updated_at) VALUES
-    ('01J00000000000000000000100', NULL, '5K', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+    ('01J00000000000000000000100', NULL, '5K - PELAJAR', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
     ('01J00000000000000000000101', '01J00000000000000000000100', '5K Early Bird', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
 
 INSERT INTO orders (id, user_id, ticket_id, number, status, created_at, updated_at, deleted_at) VALUES

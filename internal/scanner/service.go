@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ func NewService(repo *Repository, logger *slog.Logger) *Service {
 
 type ValidateResult struct {
 	Outcome     Outcome
+	Message     string
 	Target      *TargetInfo
 	Order       *OrderInfo
 	Participant *ParticipantInfo
@@ -195,6 +197,9 @@ func (s *Service) Validate(ctx context.Context, target ScanTarget, station strin
 		s.PublishDisplayOutcome(ctx, station, OutcomeNotFound)
 		return &ValidateResult{Outcome: OutcomeNotFound}, nil
 	}
+	if result := s.stationMismatch(ctx, station, lookup.TicketCategory); result != nil {
+		return result, nil
+	}
 
 	if lookup.Status == nil || *lookup.Status != "paid" {
 		s.PublishDisplayOutcome(ctx, station, OutcomeNotPaid)
@@ -252,6 +257,9 @@ func (s *Service) validateExternal(ctx context.Context, target ScanTarget, stati
 		s.PublishDisplayOutcome(ctx, station, OutcomeNotFound)
 		return &ValidateResult{Outcome: OutcomeNotFound}, nil
 	}
+	if result := s.stationMismatch(ctx, station, lookup.TicketCategory); result != nil {
+		return result, nil
+	}
 	displayName := lookup.Name
 	if lookup.BibName != nil && strings.TrimSpace(*lookup.BibName) != "" {
 		displayName = lookup.BibName
@@ -297,7 +305,7 @@ func (s *Service) publishDisplay(ctx context.Context, station string, target Sca
 	if station == "" {
 		return
 	}
-	data := &DisplayData{Version: 3, ScanID: newULID(), Outcome: result.Outcome, Message: result.Outcome.Message(), Type: target.Type, ID: target.ID, Target: result.Target, Order: result.Order, Participant: result.Participant, Ticket: result.Ticket, ScannedAt: time.Now().Format(time.RFC3339Nano)}
+	data := &DisplayData{Version: 3, ScanID: newULID(), Outcome: result.Outcome, Message: result.ResponseMessage(), Type: target.Type, ID: target.ID, Target: result.Target, Order: result.Order, Participant: result.Participant, Ticket: result.Ticket, ScannedAt: time.Now().Format(time.RFC3339Nano)}
 	s.displayCache.Set(fmt.Sprintf("display:%s", station), data, 2*time.Minute)
 	if s.logger != nil {
 		s.logger.InfoContext(ctx, "display data cached", "station", station, "target_type", target.Type, "target_id_hash", hashID(target.ID))
@@ -305,10 +313,14 @@ func (s *Service) publishDisplay(ctx context.Context, station string, target Sca
 }
 
 func (s *Service) PublishDisplayOutcome(ctx context.Context, station string, outcome Outcome) {
+	s.PublishDisplayOutcomeMessage(ctx, station, outcome, "")
+}
+
+func (s *Service) PublishDisplayOutcomeMessage(ctx context.Context, station string, outcome Outcome, message string) {
 	if station == "" {
 		return
 	}
-	data := &DisplayData{Version: 3, ScanID: newULID(), Outcome: outcome, Message: outcome.Message(), ScannedAt: time.Now().Format(time.RFC3339Nano)}
+	data := &DisplayData{Version: 3, ScanID: newULID(), Outcome: outcome, Message: responseMessage(outcome, message), ScannedAt: time.Now().Format(time.RFC3339Nano)}
 	s.displayCache.Set(fmt.Sprintf("display:%s", station), data, 2*time.Minute)
 	if s.logger != nil {
 		s.logger.InfoContext(ctx, "display outcome cached", "station", station, "outcome", outcome)
@@ -330,6 +342,7 @@ func (s *Service) GetDisplayData(station string) *DisplayData {
 
 type PickupResultResponse struct {
 	Outcome    Outcome
+	Message    string
 	PickedUpAt *string
 }
 
@@ -429,12 +442,40 @@ func (s *Service) ConfirmPickup(ctx context.Context, target ScanTarget, operator
 		s.logError(ctx, "pickup confirm failed", err, target)
 		return &PickupResultResponse{Outcome: OutcomeDatabaseUnavailable}, nil
 	}
-	response := &PickupResultResponse{Outcome: result.Outcome}
+	response := &PickupResultResponse{Outcome: result.Outcome, Message: result.Message}
+	if result.Outcome == OutcomeStationMismatch {
+		s.PublishDisplayOutcomeMessage(ctx, strconv.Itoa(station), result.Outcome, result.Message)
+	}
 	if result.PickedUpAt != nil {
 		value := result.PickedUpAt.Format(time.RFC3339)
 		response.PickedUpAt = &value
 	}
 	return response, nil
+}
+
+func (s *Service) stationMismatch(ctx context.Context, station string, category *string) *ValidateResult {
+	stationNumber, _ := strconv.Atoi(station)
+	decision := evaluateStationCategory(stationNumber, category)
+	if decision.Allowed {
+		return nil
+	}
+	s.PublishDisplayOutcomeMessage(ctx, station, OutcomeStationMismatch, decision.Message)
+	return &ValidateResult{Outcome: OutcomeStationMismatch, Message: decision.Message}
+}
+
+func (r *ValidateResult) ResponseMessage() string {
+	return responseMessage(r.Outcome, r.Message)
+}
+
+func (r *PickupResultResponse) ResponseMessage() string {
+	return responseMessage(r.Outcome, r.Message)
+}
+
+func responseMessage(outcome Outcome, message string) string {
+	if strings.TrimSpace(message) != "" {
+		return message
+	}
+	return outcome.Message()
 }
 
 func (s *Service) CancelPickup(ctx context.Context, target ScanTarget, operatorID string, station int) Outcome {

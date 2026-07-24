@@ -130,6 +130,14 @@ export function scanFeedback(input: ScanFeedbackInput): CameraFeedback {
           };
     case 'database_unavailable':
       return offlineFeedback('Server/database bermasalah. Jangan serahkan Race Pack sampai validasi berhasil.');
+    case 'station_mismatch':
+      return {
+        kind: 'error',
+        tone: 'danger',
+        title: 'Station tidak sesuai',
+        message: input.message,
+        persistent: true,
+      };
     case 'unauthenticated':
     case 'forbidden':
       return authFeedback(input.message);

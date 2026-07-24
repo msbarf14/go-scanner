@@ -182,6 +182,15 @@ async function handleScanSubmit(event: SubmitEvent) {
 }
 
 function showScanFallback(outcome: string, message?: string) {
+  if (outcome === 'station_mismatch') {
+    showFallback({
+      kind: 'invalid',
+      title: 'STATION TIDAK SESUAI',
+      message: message || 'Kategori tiket tidak dilayani di station ini. Hubungi petugas.',
+    });
+    return;
+  }
+
   if (outcome === 'not_found') {
     showFallback({
       kind: 'not_found',
